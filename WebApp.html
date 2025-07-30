@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI Task Manager</title>
+  <?!= include('styles'); ?>
+</head>
+
+<body>
+  <div class="container">
+    <header>
+      <h1>🤖 AI Task Manager</h1>
+      <p>AIがあなたのタスクを整理します</p>
+    </header>
+
+    <main>
+      <div class="input-methods">
+        <h2>入力方法を選択</h2>
+        <div class="button-group">
+          <button id="calendar-btn" class="method-btn" onclick="selectMethod('calendar')">
+            📅 カレンダーから
+          </button>
+          <button id="gmail-btn" class="method-btn" onclick="selectMethod('gmail')">
+            📧 Gmailから
+          </button>
+          <button id="voice-btn" class="method-btn" onclick="selectMethod('voice')">
+            🎤 音声入力から
+          </button>
+        </div>
+      </div>
+
+      <div id="voice-input" class="voice-input" style="display: none;">
+        <h3>音声入力</h3>
+        <button id="start-recording" class="record-btn">🎤 録音開始</button>
+        <button id="stop-recording" class="record-btn" style="display: none;">⏹️ 録音停止</button>
+        <div id="transcription" class="transcription"></div>
+        <button id="process-voice" class="process-btn" style="display: none;">音声をタスクに変換</button>
+      </div>
+
+      <div id="processing" class="processing" style="display: none;">
+        <div class="spinner"></div>
+        <p id="status-message">処理中...</p>
+      </div>
+
+      <div id="results" class="results" style="display: none;">
+        <h3>処理結果</h3>
+        <div id="result-content"></div>
+      </div>
+
+      <div class="settings">
+        <h2>設定</h2>
+        <div class="button-group">
+          <button onclick="showSettings()" class="settings-btn">⚙️ 基本設定</button>
+          <button onclick="showEmailFilterSettings()" class="settings-btn">📧 メールフィルタ設定</button>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- 基本設定モーダル -->
+  <div id="settings-modal" class="modal" style="display: none;">
+    <div class="modal-content">
+      <span class="close" onclick="closeSettings()">&times;</span>
+      <h2>基本設定</h2>
+      <form id="settings-form">
+        <div class="form-group">
+          <label for="notion-token">Notion APIトークン:</label>
+          <input type="password" id="notion-token" placeholder="secret_...">
+        </div>
+        <div class="form-group">
+          <label for="notion-database-id">NotionデータベースID:</label>
+          <input type="text" id="notion-database-id" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+        </div>
+        <div class="form-group">
+          <label for="claude-api-key">Claude APIキー (オプション):</label>
+          <input type="password" id="claude-api-key" placeholder="sk-ant-...">
+        </div>
+        <div class="form-group">
+          <label for="gemini-api-key">Gemini APIキー (オプション):</label>
+          <input type="password" id="gemini-api-key" placeholder="AIza...">
+        </div>
+        <div class="form-group">
+          <label for="execution-frequency">実行頻度:</label>
+          <select id="execution-frequency">
+            <option value="daily">毎日</option>
+            <option value="weekdays">平日のみ</option>
+            <option value="weekly">週1回</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="execution-hour">実行時間:</label>
+          <select id="execution-hour">
+            <option value="6">6時</option>
+            <option value="7">7時</option>
+            <option value="8" selected>8時（推奨）</option>
+            <option value="9">9時</option>
+            <option value="10">10時</option>
+            <option value="11">11時</option>
+            <option value="12">12時</option>
+            <option value="13">13時</option>
+            <option value="14">14時</option>
+            <option value="15">15時</option>
+            <option value="16">16時</option>
+            <option value="17">17時</option>
+            <option value="18">18時</option>
+            <option value="19">19時</option>
+            <option value="20">20時</option>
+            <option value="21">21時</option>
+            <option value="22">22時</option>
+          </select>
+          <small>自動実行する時間を選択してください</small>
+        </div>
+        <div class="form-group">
+          <label for="data-range-days">データ取得期間 (日):</label>
+          <input type="number" id="data-range-days" value="7" min="1" max="30">
+        </div>
+        <div class="form-group">
+          <label>
+            <input type="checkbox" id="enable-ai-analysis"> AI分析を有効化
+          </label>
+        </div>
+        <div class="form-group">
+          <label>
+            <input type="checkbox" id="enable-voice-input"> 音声入力を有効化
+          </label>
+        </div>
+        <div class="form-group">
+          <label>
+            <input type="checkbox" id="enable-gmail-analysis"> Gmail分析を有効化
+          </label>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="save-btn">保存</button>
+          <button type="button" onclick="testSettings()" class="test-btn">接続テスト</button>
+          <button type="button" onclick="setupTriggers()" class="trigger-btn">自動実行を設定</button>
+          <button type="button" onclick="checkTriggers()" class="info-btn">実行状況確認</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- メールフィルタ設定モーダル -->
+  <div id="email-filter-modal" class="modal" style="display: none;">
+    <div class="modal-content large">
+      <span class="close" onclick="closeEmailFilterSettings()">&times;</span>
+      <h2>📧 メールフィルタ設定</h2>
+
+      <div class="filter-tabs">
+        <button class="tab-btn active" onclick="showFilterTab('basic')">基本設定</button>
+        <button class="tab-btn" onclick="showFilterTab('exclude')">除外設定</button>
+        <button class="tab-btn" onclick="showFilterTab('include')">含める設定</button>
+        <button class="tab-btn" onclick="showFilterTab('templates')">テンプレート</button>
+      </div>
+
+      <form id="email-filter-form">
+        <!-- 基本設定タブ -->
+        <div id="basic-tab" class="tab-content active">
+          <h3>基本設定</h3>
+          <div class="form-group">
+            <label for="gmail-search-query">Gmail検索クエリ:</label>
+            <input type="text" id="gmail-search-query" placeholder="in:inbox -is:archived">
+            <small>受信箱のアーカイブされていないメールを対象</small>
+          </div>
+          <div class="form-group">
+            <label for="gmail-max-results">最大取得件数:</label>
+            <input type="number" id="gmail-max-results" value="50" min="1" max="100">
+          </div>
+          <div class="form-group">
+            <label for="gmail-date-range-days">調査期間（日数）:</label>
+            <input type="number" id="gmail-date-range-days" value="7" min="1" max="30">
+          </div>
+          <div class="form-group">
+            <label for="gmail-min-subject-length">最小件名文字数:</label>
+            <input type="number" id="gmail-min-subject-length" value="3" min="1" max="10">
+            <small>これより短い件名のメールは除外</small>
+          </div>
+          <div class="form-group">
+            <label>
+              <input type="checkbox" id="gmail-auto-exclude-categories"> 自動除外カテゴリ（プロモーション、ソーシャル、スパム）
+            </label>
+          </div>
+        </div>
+
+        <!-- 除外設定タブ -->
+        <div id="exclude-tab" class="tab-content">
+          <h3>除外設定（不要なメールを除外）</h3>
+          <div class="form-group">
+            <label for="gmail-exclude-senders">除外送信者（カンマ区切り）:</label>
+            <textarea id="gmail-exclude-senders" rows="3" placeholder="noreply@,newsletter@,marketing@"></textarea>
+            <small>例: noreply@example.com,marketing@company.com</small>
+          </div>
+          <div class="form-group">
+            <label for="gmail-exclude-domains">除外ドメイン（カンマ区切り）:</label>
+            <textarea id="gmail-exclude-domains" rows="3" placeholder="mailchimp.com,constantcontact.com"></textarea>
+            <small>例: spam-domain.com,newsletter-service.com</small>
+          </div>
+          <div class="form-group">
+            <label for="gmail-exclude-labels">除外ラベル（カンマ区切り）:</label>
+            <input type="text" id="gmail-exclude-labels" placeholder="ニュースレター,宣伝,プロモーション">
+          </div>
+          <div class="form-group">
+            <label for="gmail-exclude-keywords">除外キーワード（カンマ区切り）:</label>
+            <textarea id="gmail-exclude-keywords" rows="4" placeholder="配信停止,unsubscribe,広告,セール"></textarea>
+            <small>件名や本文にこれらのキーワードが含まれるメールを除外</small>
+          </div>
+          <div class="form-group">
+            <label>
+              <input type="checkbox" id="gmail-enable-spam-filter"> スパム・宣伝メール自動除外
+            </label>
+          </div>
+        </div>
+
+        <!-- 含める設定タブ -->
+        <div id="include-tab" class="tab-content">
+          <h3>含める設定（重要なメールを優先）</h3>
+          <div class="form-group">
+            <label for="gmail-include-senders">含める送信者（カンマ区切り）:</label>
+            <textarea id="gmail-include-senders" rows="3"
+              placeholder="boss@company.com,client@important.com"></textarea>
+            <small>除外設定を上書きして必ず処理するメールアドレス</small>
+          </div>
+          <div class="form-group">
+            <label for="gmail-include-keywords">含めるキーワード（カンマ区切り）:</label>
+            <textarea id="gmail-include-keywords" rows="3" placeholder="会議,打ち合わせ,確認,依頼"></textarea>
+            <small>これらのキーワードが含まれるメールは中優先度で処理</small>
+          </div>
+          <div class="form-group">
+            <label for="gmail-high-priority-keywords">高優先度キーワード（カンマ区切り）:</label>
+            <textarea id="gmail-high-priority-keywords" rows="3" placeholder="緊急,至急,重要,ASAP"></textarea>
+            <small>これらのキーワードが含まれるメールは最優先で処理</small>
+          </div>
+          <div class="form-group">
+            <label>
+              <input type="checkbox" id="gmail-enable-gemini-analysis"> Geminiによるメール内容分析
+            </label>
+          </div>
+        </div>
+
+        <!-- テンプレートタブ -->
+        <div id="templates-tab" class="tab-content">
+          <h3>設定テンプレート</h3>
+          <p>用途に応じた設定テンプレートを適用できます。</p>
+
+          <div class="template-options">
+            <div class="template-card">
+              <h4>🏢 ビジネス用（推奨）</h4>
+              <p>一般的なビジネス環境に適した設定。営業メールや宣伝を適度に除外し、重要な業務メールを優先します。</p>
+              <button type="button" onclick="applyTemplate('business')" class="template-btn">適用</button>
+            </div>
+
+            <div class="template-card">
+              <h4>👤 個人用</h4>
+              <p>個人利用に適した緩めの設定。重要なメールを見逃さないよう、除外条件を最小限に抑えます。</p>
+              <button type="button" onclick="applyTemplate('personal')" class="template-btn">適用</button>
+            </div>
+
+            <div class="template-card">
+              <h4>🔒 厳格版</h4>
+              <p>厳しいフィルタリング設定。スパムや宣伝メールを徹底的に除外し、本当に重要なメールのみを処理します。</p>
+              <button type="button" onclick="applyTemplate('strict')" class="template-btn">適用</button>
+            </div>
+          </div>
+
+          <div class="template-actions">
+            <button type="button" onclick="resetToDefaults()" class="reset-btn">デフォルトに戻す</button>
+            <button type="button" onclick="testCurrentSettings()" class="test-btn">現在の設定でテスト</button>
+          </div>
+        </div>
+
+        <div class="form-actions">
+          <button type="submit" class="save-btn">設定を保存</button>
+          <button type="button" onclick="loadCurrentFilterSettings()" class="load-btn">現在の設定を読み込み</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <?!= include('script'); ?>
+</body>
+
+</html>

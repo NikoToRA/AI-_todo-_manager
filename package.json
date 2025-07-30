@@ -1,0 +1,44 @@
+{
+  "name": "ai-task-manager",
+  "version": "1.0.0",
+  "description": "AI駆動タスク管理システム - Gmail、Googleカレンダーからタスクを自動抽出してNotionに登録",
+  "main": "OneClickSetup.gs",
+  "scripts": {
+    "setup": "echo 'OneClickSetup.gs をGoogle Apps Scriptにコピーして startOneClickSetup() を実行してください'",
+    "test": "echo 'GAS環境で testAllSystems() を実行してください'",
+    "deploy": "echo 'clasp push でデプロイできます（clasp設定が必要）'"
+  },
+  "keywords": [
+    "google-apps-script",
+    "notion",
+    "gmail",
+    "calendar",
+    "task-management",
+    "ai",
+    "gemini",
+    "automation",
+    "productivity"
+  ],
+  "author": "AI Task Manager Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/ai-task-manager.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-username/ai-task-manager/issues"
+  },
+  "homepage": "https://github.com/your-username/ai-task-manager#readme",
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "devDependencies": {
+    "@google/clasp": "^2.4.2"
+  },
+  "gas": {
+    "runtime": "V8",
+    "executionApi": {
+      "access": "ANYONE"
+    }
+  }
+}

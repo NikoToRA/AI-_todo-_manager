@@ -1,0 +1,646 @@
+<script>
+  let currentMethod = null;
+  let recognition = null;
+  let isRecording = false;
+  
+  /**
+   * 入力方法選択
+   */
+  function selectMethod(method) {
+    currentMethod = method;
+    
+    // ボタンの状態更新
+    document.querySelectorAll('.method-btn').forEach(btn => {
+      btn.classList.remove('active');
+    });
+    document.getElementById(`${method}-btn`).classList.add('active');
+    
+    // 音声入力の場合は音声入力UIを表示
+    if (method === 'voice') {
+      document.getElementById('voice-input').style.display = 'block';
+      initVoiceRecognition();
+    } else {
+      document.getElementById('voice-input').style.display = 'none';
+      // 処理開始
+      startProcessing(method);
+    }
+  }
+  
+  /**
+   * 音声認識初期化
+   */
+  function initVoiceRecognition() {
+    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      recognition = new SpeechRecognition();
+      
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = 'ja-JP';
+      
+      recognition.onstart = function() {
+        console.log('音声認識開始');
+        document.getElementById('start-recording').style.display = 'none';
+        document.getElementById('stop-recording').style.display = 'inline-block';
+        document.getElementById('start-recording').classList.add('recording');
+      };
+      
+      recognition.onresult = function(event) {
+        let transcript = '';
+        for (let i = 0; i < event.results.length; i++) {
+          transcript += event.results[i][0].transcript;
+        }
+        document.getElementById('transcription').textContent = transcript;
+        
+        if (transcript.trim().length > 0) {
+          document.getElementById('process-voice').style.display = 'inline-block';
+        }
+      };
+      
+      recognition.onerror = function(event) {
+        console.error('音声認識エラー:', event.error);
+        alert('音声認識でエラーが発生しました: ' + event.error);
+        stopRecording();
+      };
+      
+      recognition.onend = function() {
+        console.log('音声認識終了');
+        stopRecording();
+      };
+    } else {
+      alert('お使いのブラウザは音声認識に対応していません');
+    }
+  }
+  
+  /**
+   * 録音開始
+   */
+  function startRecording() {
+    if (recognition) {
+      recognition.start();
+      isRecording = true;
+    }
+  }
+  
+  /**
+   * 録音停止
+   */
+  function stopRecording() {
+    if (recognition && isRecording) {
+      recognition.stop();
+      isRecording = false;
+    }
+    
+    document.getElementById('start-recording').style.display = 'inline-block';
+    document.getElementById('stop-recording').style.display = 'none';
+    document.getElementById('start-recording').classList.remove('recording');
+  }
+  
+  /**
+   * 音声をタスクに変換
+   */
+  function processVoiceInput() {
+    const transcription = document.getElementById('transcription').textContent;
+    if (transcription.trim().length === 0) {
+      alert('音声が認識されていません');
+      return;
+    }
+    
+    startProcessing('voice', { transcription: transcription });
+  }
+  
+  /**
+   * 処理開始
+   */
+  function startProcessing(method, options = {}) {
+    // UI更新
+    document.querySelector('.input-methods').style.display = 'none';
+    document.getElementById('voice-input').style.display = 'none';
+    document.getElementById('processing').style.display = 'block';
+    document.getElementById('results').style.display = 'none';
+    
+    updateStatus(`${getMethodName(method)}からタスクを抽出中...`);
+    
+    // GAS関数呼び出し
+    google.script.run
+      .withSuccessHandler(onProcessingSuccess)
+      .withFailureHandler(onProcessingError)
+      .manualTaskExtraction(method, options);
+  }
+  
+  /**
+   * 処理成功時のコールバック
+   */
+  function onProcessingSuccess(result) {
+    console.log('処理成功:', result);
+    
+    document.getElementById('processing').style.display = 'none';
+    document.getElementById('results').style.display = 'block';
+    
+    if (result.success) {
+      displayResults(result);
+    } else {
+      displayError(result.error);
+    }
+  }
+  
+  /**
+   * 処理エラー時のコールバック
+   */
+  function onProcessingError(error) {
+    console.error('処理エラー:', error);
+    
+    document.getElementById('processing').style.display = 'none';
+    document.getElementById('results').style.display = 'block';
+    
+    displayError(error.message || 'エラーが発生しました');
+  }
+  
+  /**
+   * 結果表示
+   */
+  function displayResults(result) {
+    const content = document.getElementById('result-content');
+    
+    if (result.tasks && result.tasks.length > 0) {
+      content.innerHTML = `
+        <div class="success">
+          <h4>✅ 処理完了</h4>
+          <p>${result.message}</p>
+          <div class="task-list">
+            ${result.tasks.map(task => `
+              <div class="task-item">
+                <div>
+                  <strong>${task.title}</strong>
+                  ${task.due_date ? `<div class="due-date">期日: ${formatDate(task.due_date)}</div>` : ''}
+                </div>
+                <div>
+                  <span class="priority priority-${task.priority}">${task.priority}</span>
+                  ${task.created ? '<span style="color: #10b981; font-size: 12px;">✓ 作成済み</span>' : 
+                    task.skipped ? '<span style="color: #f59e0b; font-size: 12px;">⚠ 重複スキップ</span>' : ''}
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+        <button onclick="resetUI()" class="reset-btn">新しい処理を開始</button>
+      `;
+    } else {
+      content.innerHTML = `
+        <div class="success">
+          <h4>✅ 処理完了</h4>
+          <p>新しいタスクは見つかりませんでした</p>
+        </div>
+        <button onclick="resetUI()" class="reset-btn">新しい処理を開始</button>
+      `;
+    }
+  }
+  
+  /**
+   * エラー表示
+   */
+  function displayError(error) {
+    const content = document.getElementById('result-content');
+    content.innerHTML = `
+      <div class="error">
+        <h4>❌ エラーが発生しました</h4>
+        <p>${error}</p>
+        <p><small>設定を確認してください。Notion APIトークンとデータベースIDが正しく設定されている必要があります。</small></p>
+      </div>
+      <button onclick="resetUI()" class="reset-btn">再試行</button>
+    `;
+  }
+  
+  /**
+   * UI リセット
+   */
+  function resetUI() {
+    document.querySelector('.input-methods').style.display = 'block';
+    document.getElementById('voice-input').style.display = 'none';
+    document.getElementById('processing').style.display = 'none';
+    document.getElementById('results').style.display = 'none';
+    
+    // ボタンの状態リセット
+    document.querySelectorAll('.method-btn').forEach(btn => {
+      btn.classList.remove('active');
+    });
+    
+    // 音声入力のリセット
+    document.getElementById('transcription').textContent = '';
+    document.getElementById('process-voice').style.display = 'none';
+    
+    currentMethod = null;
+  }
+  
+  /**
+   * ステータス更新
+   */
+  function updateStatus(message) {
+    document.getElementById('status-message').textContent = message;
+  }
+  
+  /**
+   * メソッド名取得
+   */
+  function getMethodName(method) {
+    const names = {
+      'calendar': 'カレンダー',
+      'gmail': 'Gmail',
+      'voice': '音声入力'
+    };
+    return names[method] || method;
+  }
+  
+  /**
+   * 日付フォーマット
+   */
+  function formatDate(dateString) {
+    if (!dateString) return '';
+    const date = new Date(dateString);
+    return date.toLocaleDateString('ja-JP');
+  }
+  
+  /**
+   * 設定画面表示
+   */
+  function showSettings() {
+    document.getElementById('settings-modal').style.display = 'block';
+    loadSettings();
+  }
+  
+  /**
+   * 設定画面を閉じる
+   */
+  function closeSettings() {
+    document.getElementById('settings-modal').style.display = 'none';
+  }
+  
+  /**
+   * 設定読み込み
+   */
+  function loadSettings() {
+    google.script.run
+      .withSuccessHandler(function(config) {
+        document.getElementById('notion-token').value = config.notionToken || '';
+        document.getElementById('notion-database-id').value = config.notionDatabaseId || '';
+        document.getElementById('claude-api-key').value = config.claudeApiKey || '';
+        document.getElementById('gemini-api-key').value = config.geminiApiKey || '';
+        document.getElementById('execution-frequency').value = config.executionFrequency || 'daily';
+        document.getElementById('execution-hour').value = config.executionHour || 8;
+        document.getElementById('data-range-days').value = config.dataRangeDays || 7;
+        document.getElementById('enable-ai-analysis').checked = config.enableAiAnalysis || false;
+        document.getElementById('enable-voice-input').checked = config.enableVoiceInput || false;
+        document.getElementById('enable-gmail-analysis').checked = config.enableGmailAnalysis || false;
+      })
+      .withFailureHandler(function(error) {
+        console.error('設定読み込みエラー:', error);
+        alert('設定の読み込みに失敗しました');
+      })
+      .getConfig();
+  }
+  
+  /**
+   * 設定保存
+   */
+  function saveSettings(event) {
+    event.preventDefault();
+    
+    const config = {
+      notionToken: document.getElementById('notion-token').value,
+      notionDatabaseId: document.getElementById('notion-database-id').value,
+      claudeApiKey: document.getElementById('claude-api-key').value,
+      geminiApiKey: document.getElementById('gemini-api-key').value,
+      executionFrequency: document.getElementById('execution-frequency').value,
+      executionHour: parseInt(document.getElementById('execution-hour').value),
+      dataRangeDays: parseInt(document.getElementById('data-range-days').value),
+      enableAiAnalysis: document.getElementById('enable-ai-analysis').checked,
+      enableVoiceInput: document.getElementById('enable-voice-input').checked,
+      enableGmailAnalysis: document.getElementById('enable-gmail-analysis').checked
+    };
+    
+    google.script.run
+      .withSuccessHandler(function() {
+        alert('設定を保存しました');
+        closeSettings();
+      })
+      .withFailureHandler(function(error) {
+        console.error('設定保存エラー:', error);
+        alert('設定の保存に失敗しました: ' + error.message);
+      })
+      .setConfig(config);
+  }
+  
+  /**
+   * 接続テスト
+   */
+  function testSettings() {
+    google.script.run
+      .withSuccessHandler(function(result) {
+        if (result.isValid) {
+          alert('✅ 接続テスト成功！設定は正常です。');
+        } else {
+          alert('❌ 接続テストに失敗しました:\n' + result.errors.join('\n'));
+        }
+      })
+      .withFailureHandler(function(error) {
+        console.error('接続テストエラー:', error);
+        alert('接続テストでエラーが発生しました: ' + error.message);
+      })
+      .validateConfig();
+  }
+  
+  // イベントリスナー設定
+  document.addEventListener('DOMContentLoaded', function() {
+    // 録音ボタンのイベント
+    document.getElementById('start-recording').addEventListener('click', startRecording);
+    document.getElementById('stop-recording').addEventListener('click', stopRecording);
+    document.getElementById('process-voice').addEventListener('click', processVoiceInput);
+    
+    // 設定フォームのイベント
+    document.getElementById('settings-form').addEventListener('submit', saveSettings);
+    document.getElementById('email-filter-form').addEventListener('submit', saveEmailFilterSettings);
+    
+    // モーダル外クリックで閉じる
+    window.addEventListener('click', function(event) {
+      const settingsModal = document.getElementById('settings-modal');
+      const filterModal = document.getElementById('email-filter-modal');
+      
+      if (event.target === settingsModal) {
+        closeSettings();
+      }
+      if (event.target === filterModal) {
+        closeEmailFilterSettings();
+      }
+    });
+  });
+  
+  /**
+   * メールフィルタ設定画面表示
+   */
+  function showEmailFilterSettings() {
+    document.getElementById('email-filter-modal').style.display = 'block';
+    loadCurrentFilterSettings();
+  }
+  
+  /**
+   * メールフィルタ設定画面を閉じる
+   */
+  function closeEmailFilterSettings() {
+    document.getElementById('email-filter-modal').style.display = 'none';
+  }
+  
+  /**
+   * フィルタ設定タブ切り替え
+   */
+  function showFilterTab(tabName) {
+    // タブボタンの状態更新
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+      btn.classList.remove('active');
+    });
+    document.querySelector(`[onclick="showFilterTab('${tabName}')"]`).classList.add('active');
+    
+    // タブコンテンツの表示切り替え
+    document.querySelectorAll('.tab-content').forEach(content => {
+      content.classList.remove('active');
+    });
+    document.getElementById(`${tabName}-tab`).classList.add('active');
+  }
+  
+  /**
+   * 現在のフィルタ設定を読み込み
+   */
+  function loadCurrentFilterSettings() {
+    google.script.run
+      .withSuccessHandler(function(config) {
+        // 基本設定
+        document.getElementById('gmail-search-query').value = config.gmailSearchQuery || 'in:inbox -is:archived';
+        document.getElementById('gmail-max-results').value = config.gmailMaxResults || 50;
+        document.getElementById('gmail-date-range-days').value = config.gmailDateRangeDays || 7;
+        document.getElementById('gmail-min-subject-length').value = config.gmailMinSubjectLength || 3;
+        document.getElementById('gmail-auto-exclude-categories').checked = config.gmailAutoExcludeCategories !== false;
+        
+        // 除外設定
+        document.getElementById('gmail-exclude-senders').value = config.gmailExcludeSenders || '';
+        document.getElementById('gmail-exclude-domains').value = config.gmailExcludeDomains || '';
+        document.getElementById('gmail-exclude-labels').value = config.gmailExcludeLabels || '';
+        document.getElementById('gmail-exclude-keywords').value = config.gmailExcludeKeywords || '';
+        document.getElementById('gmail-enable-spam-filter').checked = config.gmailEnableSpamFilter === true;
+        
+        // 含める設定
+        document.getElementById('gmail-include-senders').value = config.gmailIncludeSenders || '';
+        document.getElementById('gmail-include-keywords').value = config.gmailIncludeKeywords || '';
+        document.getElementById('gmail-high-priority-keywords').value = config.gmailHighPriorityKeywords || '';
+        document.getElementById('gmail-enable-gemini-analysis').checked = config.gmailEnableGeminiAnalysis !== false;
+      })
+      .withFailureHandler(function(error) {
+        console.error('フィルタ設定読み込みエラー:', error);
+        alert('フィルタ設定の読み込みに失敗しました');
+      })
+      .getConfig();
+  }
+  
+  /**
+   * フィルタ設定保存
+   */
+  function saveEmailFilterSettings(event) {
+    event.preventDefault();
+    
+    const filterConfig = {
+      GMAIL_SEARCH_QUERY: document.getElementById('gmail-search-query').value,
+      GMAIL_MAX_RESULTS: document.getElementById('gmail-max-results').value,
+      GMAIL_DATE_RANGE_DAYS: document.getElementById('gmail-date-range-days').value,
+      GMAIL_MIN_SUBJECT_LENGTH: document.getElementById('gmail-min-subject-length').value,
+      GMAIL_AUTO_EXCLUDE_CATEGORIES: document.getElementById('gmail-auto-exclude-categories').checked.toString(),
+      GMAIL_EXCLUDE_SENDERS: document.getElementById('gmail-exclude-senders').value,
+      GMAIL_EXCLUDE_DOMAINS: document.getElementById('gmail-exclude-domains').value,
+      GMAIL_EXCLUDE_LABELS: document.getElementById('gmail-exclude-labels').value,
+      GMAIL_EXCLUDE_KEYWORDS: document.getElementById('gmail-exclude-keywords').value,
+      GMAIL_ENABLE_SPAM_FILTER: document.getElementById('gmail-enable-spam-filter').checked.toString(),
+      GMAIL_INCLUDE_SENDERS: document.getElementById('gmail-include-senders').value,
+      GMAIL_INCLUDE_KEYWORDS: document.getElementById('gmail-include-keywords').value,
+      GMAIL_HIGH_PRIORITY_KEYWORDS: document.getElementById('gmail-high-priority-keywords').value,
+      GMAIL_ENABLE_GEMINI_ANALYSIS: document.getElementById('gmail-enable-gemini-analysis').checked.toString()
+    };
+    
+    google.script.run
+      .withSuccessHandler(function() {
+        alert('✅ メールフィルタ設定を保存しました');
+        // 設定をPropertiesServiceに同期
+        google.script.run.syncSheetToProperties();
+      })
+      .withFailureHandler(function(error) {
+        console.error('フィルタ設定保存エラー:', error);
+        alert('❌ フィルタ設定の保存に失敗しました: ' + error.message);
+      })
+      .saveConfigToSheet(filterConfig);
+  }
+  
+  /**
+   * テンプレート適用
+   */
+  function applyTemplate(templateType) {
+    if (!confirm(`${templateType}テンプレートを適用しますか？現在の設定は上書きされます。`)) {
+      return;
+    }
+    
+    google.script.run
+      .withSuccessHandler(function() {
+        alert(`✅ ${templateType}テンプレートを適用しました`);
+        loadCurrentFilterSettings(); // 設定を再読み込み
+      })
+      .withFailureHandler(function(error) {
+        console.error('テンプレート適用エラー:', error);
+        alert('❌ テンプレートの適用に失敗しました: ' + error.message);
+      })
+      .applyEmailFilterTemplate(templateType);
+  }
+  
+  /**
+   * デフォルト設定に戻す
+   */
+  function resetToDefaults() {
+    if (!confirm('デフォルト設定に戻しますか？現在の設定は失われます。')) {
+      return;
+    }
+    
+    // デフォルト値を設定
+    document.getElementById('gmail-search-query').value = 'in:inbox -is:archived';
+    document.getElementById('gmail-max-results').value = '50';
+    document.getElementById('gmail-date-range-days').value = '7';
+    document.getElementById('gmail-min-subject-length').value = '3';
+    document.getElementById('gmail-auto-exclude-categories').checked = true;
+    
+    document.getElementById('gmail-exclude-senders').value = 'noreply@,newsletter@,marketing@';
+    document.getElementById('gmail-exclude-domains').value = 'mailchimp.com,constantcontact.com';
+    document.getElementById('gmail-exclude-labels').value = 'ニュースレター,宣伝';
+    document.getElementById('gmail-exclude-keywords').value = '配信停止,unsubscribe,広告,セール,キャンペーン';
+    document.getElementById('gmail-enable-spam-filter').checked = true;
+    
+    document.getElementById('gmail-include-senders').value = '';
+    document.getElementById('gmail-include-keywords').value = '会議,打ち合わせ,確認,依頼,締切,提出,作成';
+    document.getElementById('gmail-high-priority-keywords').value = '緊急,至急,重要,ASAP,締切';
+    document.getElementById('gmail-enable-gemini-analysis').checked = true;
+    
+    alert('✅ デフォルト設定に戻しました');
+  }
+  
+  /**
+   * 現在の設定でテスト
+   */
+  function testCurrentSettings() {
+    google.script.run
+      .withSuccessHandler(function(result) {
+        let message = '🔍 メールフィルタテスト結果:\n\n';
+        message += `📧 総メール数: ${result.total}\n`;
+        message += `✅ 処理対象: ${result.processed}\n`;
+        message += `❌ スキップ: ${result.skipped}\n`;
+        message += `🔥 高優先度: ${result.highPriority}\n`;
+        message += `📋 中優先度: ${result.mediumPriority}\n`;
+        message += `📝 低優先度: ${result.lowPriority}\n`;
+        
+        if (result.reasons) {
+          message += '\n📊 除外理由:\n';
+          Object.keys(result.reasons).forEach(reason => {
+            message += `- ${reason}: ${result.reasons[reason]}件\n`;
+          });
+        }
+        
+        alert(message);
+      })
+      .withFailureHandler(function(error) {
+        console.error('設定テストエラー:', error);
+        alert('❌ 設定テストに失敗しました: ' + error.message);
+      })
+      .testRealEmailFiltering();
+  }
+  
+  // GAS関数のプロキシ
+  function getConfig() {
+    return ConfigManager.getConfig();
+  }
+  
+  function setConfig(config) {
+    return ConfigManager.setConfig(config);
+  }
+  
+  function validateConfig() {
+    return ConfigManager.validateConfig();
+  }
+  
+  function saveConfigToSheet(config) {
+    return ConfigManager.saveConfigToSheet(config);
+  }
+  
+  function syncSheetToProperties() {
+    return ConfigManager.syncSheetToProperties();
+  }
+  
+  function applyEmailFilterTemplate(templateType) {
+    return applyEmailFilterTemplate(templateType);
+  }
+  
+  function testRealEmailFiltering() {
+    return testRealEmailFiltering();
+  }
+  
+  /**
+   * 自動実行トリガーを設定
+   */
+  function setupTriggers() {
+    google.script.run
+      .withSuccessHandler(function(result) {
+        if (result.success) {
+          alert('✅ 自動実行トリガーを設定しました\n' + result.message);
+        } else {
+          alert('❌ トリガー設定に失敗しました\n' + result.error);
+        }
+      })
+      .withFailureHandler(function(error) {
+        console.error('トリガー設定エラー:', error);
+        alert('❌ トリガー設定でエラーが発生しました: ' + error.message);
+      })
+      .setupAutoTriggers();
+  }
+  
+  /**
+   * 現在のトリガー状況を確認
+   */
+  function checkTriggers() {
+    google.script.run
+      .withSuccessHandler(function(result) {
+        if (result.success) {
+          let message = '🔍 現在のトリガー状況:\n\n';
+          message += `設定済みトリガー数: ${result.count}個\n\n`;
+          
+          if (result.triggers && result.triggers.length > 0) {
+            message += '📋 トリガー詳細:\n';
+            result.triggers.forEach((trigger, index) => {
+              message += `${index + 1}. ${trigger.function}\n`;
+              message += `   タイプ: ${trigger.type}\n`;
+              message += `   有効: ${trigger.enabled ? 'はい' : 'いいえ'}\n\n`;
+            });
+          } else {
+            message += '⚠️ 自動実行トリガーが設定されていません\n';
+            message += '「自動実行を設定」ボタンをクリックして設定してください';
+          }
+          
+          alert(message);
+        } else {
+          alert('❌ トリガー状況の確認に失敗しました\n' + result.error);
+        }
+      })
+      .withFailureHandler(function(error) {
+        console.error('トリガー確認エラー:', error);
+        alert('❌ トリガー確認でエラーが発生しました: ' + error.message);
+      })
+      .getTriggerInfo();
+  }
+  
+  function setupAutoTriggers() {
+    return setupAutoTriggers();
+  }
+  
+  function getTriggerInfo() {
+    return getTriggerInfo();
+  }
+</script>
