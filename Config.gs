@@ -51,17 +51,64 @@ class ConfigManager {
   static setConfig(config) {
     const props = PropertiesService.getScriptProperties();
     
-    if (config.notionToken) props.setProperty('NOTION_TOKEN', config.notionToken);
-    if (config.notionDatabaseId) props.setProperty('NOTION_DATABASE_ID', config.notionDatabaseId);
-    if (config.aiProvider) props.setProperty('AI_PROVIDER', config.aiProvider);
-    if (config.claudeApiKey) props.setProperty('CLAUDE_API_KEY', config.claudeApiKey);
-    if (config.geminiApiKey) props.setProperty('GEMINI_API_KEY', config.geminiApiKey);
-    if (config.executionFrequency) props.setProperty('EXECUTION_FREQUENCY', config.executionFrequency);
-    if (config.executionHour !== undefined) props.setProperty('EXECUTION_HOUR', config.executionHour.toString());
-    if (config.dataRangeDays) props.setProperty('DATA_RANGE_DAYS', config.dataRangeDays.toString());
-    if (config.enableAiAnalysis !== undefined) props.setProperty('ENABLE_AI_ANALYSIS', config.enableAiAnalysis.toString());
-    if (config.enableVoiceInput !== undefined) props.setProperty('ENABLE_VOICE_INPUT', config.enableVoiceInput.toString());
-    if (config.enableGmailAnalysis !== undefined) props.setProperty('ENABLE_GMAIL_ANALYSIS', config.enableGmailAnalysis.toString());
+    console.log('[ConfigManager] 設定保存開始:', JSON.stringify(config, null, 2));
+    
+    try {
+      // 基本設定の保存
+      if (config.notionToken) props.setProperty('NOTION_TOKEN', config.notionToken);
+      if (config.notionDatabaseId) props.setProperty('NOTION_DATABASE_ID', config.notionDatabaseId);
+      if (config.aiProvider) props.setProperty('AI_PROVIDER', config.aiProvider);
+      if (config.claudeApiKey) props.setProperty('CLAUDE_API_KEY', config.claudeApiKey);
+      if (config.geminiApiKey) props.setProperty('GEMINI_API_KEY', config.geminiApiKey);
+      
+      // 実行設定の保存（重要：必ず保存する）
+      if (config.executionFrequency) {
+        props.setProperty('EXECUTION_FREQUENCY', config.executionFrequency);
+        console.log('[ConfigManager] 実行頻度保存:', config.executionFrequency);
+      }
+      
+      if (config.executionHour !== undefined && config.executionHour !== null) {
+        const hourStr = config.executionHour.toString();
+        props.setProperty('EXECUTION_HOUR', hourStr);
+        console.log('[ConfigManager] 実行時間保存:', hourStr);
+      }
+      
+      if (config.dataRangeDays !== undefined && config.dataRangeDays !== null) {
+        props.setProperty('DATA_RANGE_DAYS', config.dataRangeDays.toString());
+      }
+      
+      // 機能有効化設定の保存
+      if (config.enableAiAnalysis !== undefined) {
+        props.setProperty('ENABLE_AI_ANALYSIS', config.enableAiAnalysis.toString());
+      }
+      if (config.enableVoiceInput !== undefined) {
+        props.setProperty('ENABLE_VOICE_INPUT', config.enableVoiceInput.toString());
+      }
+      if (config.enableGmailAnalysis !== undefined) {
+        props.setProperty('ENABLE_GMAIL_ANALYSIS', config.enableGmailAnalysis.toString());
+      }
+      
+      console.log('[ConfigManager] 設定保存完了');
+      
+      // 保存後の確認
+      const savedConfig = this.getConfig();
+      console.log('[ConfigManager] 保存後の設定確認:');
+      console.log('- 実行頻度:', savedConfig.executionFrequency);
+      console.log('- 実行時間:', savedConfig.executionHour);
+      
+      return {
+        success: true,
+        message: '設定を正常に保存しました',
+        savedConfig: {
+          executionFrequency: savedConfig.executionFrequency,
+          executionHour: savedConfig.executionHour
+        }
+      };
+      
+    } catch (error) {
+      console.error('[ConfigManager] 設定保存エラー:', error.message);
+      throw new Error(`設定の保存に失敗しました: ${error.message}`);
+    }
   }
   
   static validateConfig() {
@@ -261,7 +308,8 @@ class ConfigManager {
         for (let i = 1; i < basicData.length; i++) {
           const [key, value] = basicData[i];
           if (key && value !== '') {
-            config[key] = value;
+            // 数値型の値を文字列に変換
+            config[key] = typeof value === 'number' ? value.toString() : value;
           }
         }
       }
@@ -273,7 +321,8 @@ class ConfigManager {
         for (let i = 1; i < filterData.length; i++) {
           const [key, value] = filterData[i];
           if (key && value !== '' && !key.startsWith('===')) {
-            config[key] = value;
+            // 数値型の値を文字列に変換
+            config[key] = typeof value === 'number' ? value.toString() : value;
           }
         }
       }
@@ -326,10 +375,48 @@ class ConfigManager {
   static _updateSheetConfig(sheet, config) {
     const data = sheet.getDataRange().getValues();
     
+    // キーマッピング（設定オブジェクトのキー → スプレッドシートのキー）
+    const keyMapping = {
+      'executionHour': 'EXECUTION_HOUR',
+      'executionFrequency': 'EXECUTION_FREQUENCY',
+      'dataRangeDays': 'DATA_RANGE_DAYS',
+      'enableAiAnalysis': 'ENABLE_AI_ANALYSIS',
+      'enableVoiceInput': 'ENABLE_VOICE_INPUT',
+      'enableGmailAnalysis': 'ENABLE_GMAIL_ANALYSIS',
+      'notionToken': 'NOTION_TOKEN',
+      'notionDatabaseId': 'NOTION_DATABASE_ID',
+      'geminiApiKey': 'GEMINI_API_KEY',
+      'claudeApiKey': 'CLAUDE_API_KEY'
+    };
+    
     for (let i = 1; i < data.length; i++) {
-      const key = data[i][0];
-      if (key && config.hasOwnProperty(key)) {
-        sheet.getRange(i + 1, 2).setValue(config[key]);
+      const sheetKey = data[i][0]; // スプレッドシートのキー（例: EXECUTION_HOUR）
+      
+      // 設定オブジェクトから対応する値を探す
+      let configValue = null;
+      
+      // 1. 直接キーマッチング
+      if (config.hasOwnProperty(sheetKey)) {
+        configValue = config[sheetKey];
+      } else {
+        // 2. キーマッピングを使用
+        for (const [configKey, mappedKey] of Object.entries(keyMapping)) {
+          if (mappedKey === sheetKey && config.hasOwnProperty(configKey)) {
+            configValue = config[configKey];
+            break;
+          }
+        }
+      }
+      
+      // 値が見つかった場合は更新
+      if (configValue !== null && configValue !== undefined) {
+        // 値を文字列に変換（boolean や number も文字列として保存）
+        const stringValue = typeof configValue === 'boolean' ? configValue.toString() : 
+                           typeof configValue === 'number' ? configValue.toString() : 
+                           configValue;
+        
+        sheet.getRange(i + 1, 2).setValue(stringValue);
+        console.log(`[ConfigManager] ${sheetKey}を${stringValue}に更新`);
       }
     }
   }

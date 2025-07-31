@@ -305,11 +305,17 @@
   function saveSettings(event) {
     event.preventDefault();
     
+    // 保存中の表示
+    const saveBtn = event.target.querySelector('.save-btn');
+    const originalText = saveBtn.textContent;
+    saveBtn.textContent = '保存中...';
+    saveBtn.disabled = true;
+    
     const config = {
-      notionToken: document.getElementById('notion-token').value,
-      notionDatabaseId: document.getElementById('notion-database-id').value,
-      claudeApiKey: document.getElementById('claude-api-key').value,
-      geminiApiKey: document.getElementById('gemini-api-key').value,
+      notionToken: document.getElementById('notion-token').value.trim(),
+      notionDatabaseId: document.getElementById('notion-database-id').value.trim(),
+      claudeApiKey: document.getElementById('claude-api-key').value.trim(),
+      geminiApiKey: document.getElementById('gemini-api-key').value.trim(),
       executionFrequency: document.getElementById('execution-frequency').value,
       executionHour: parseInt(document.getElementById('execution-hour').value),
       dataRangeDays: parseInt(document.getElementById('data-range-days').value),
@@ -318,14 +324,53 @@
       enableGmailAnalysis: document.getElementById('enable-gmail-analysis').checked
     };
     
+    console.log('保存する設定:', config);
+    
     google.script.run
-      .withSuccessHandler(function() {
-        alert('設定を保存しました');
-        closeSettings();
+      .withSuccessHandler(function(result) {
+        console.log('設定保存成功:', result);
+        
+        // 設定をスプレッドシートにも保存
+        google.script.run
+          .withSuccessHandler(function() {
+            console.log('スプレッドシート保存完了');
+            
+            // PropertiesServiceに同期
+            google.script.run
+              .withSuccessHandler(function() {
+                console.log('設定同期完了');
+                alert('✅ 設定を保存しました\n実行時間: ' + config.executionHour + '時\n実行頻度: ' + config.executionFrequency);
+                
+                // ボタンを元に戻す
+                saveBtn.textContent = originalText;
+                saveBtn.disabled = false;
+                
+                closeSettings();
+              })
+              .withFailureHandler(function(error) {
+                console.error('設定同期エラー:', error);
+                alert('⚠️ 設定は保存されましたが、同期でエラーが発生しました: ' + error.message);
+                
+                saveBtn.textContent = originalText;
+                saveBtn.disabled = false;
+              })
+              .syncSheetToProperties();
+          })
+          .withFailureHandler(function(error) {
+            console.error('スプレッドシート保存エラー:', error);
+            alert('⚠️ 基本設定は保存されましたが、スプレッドシート保存でエラーが発生しました: ' + error.message);
+            
+            saveBtn.textContent = originalText;
+            saveBtn.disabled = false;
+          })
+          .saveConfigToSheet(config);
       })
       .withFailureHandler(function(error) {
         console.error('設定保存エラー:', error);
-        alert('設定の保存に失敗しました: ' + error.message);
+        alert('❌ 設定の保存に失敗しました: ' + error.message);
+        
+        saveBtn.textContent = originalText;
+        saveBtn.disabled = false;
       })
       .setConfig(config);
   }

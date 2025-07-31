@@ -70,6 +70,8 @@ function createWeekdaysTrigger() {
   const config = ConfigManager.getConfig();
   const hour = config.executionHour || 8;
   
+  console.log(`[createWeekdaysTrigger] 設定時間: ${hour}時`);
+  
   // 平日判定付きの1日1回実行トリガーを作成
   ScriptApp.newTrigger('autoTaskExtractionWeekdays')
     .timeBased()
@@ -78,6 +80,41 @@ function createWeekdaysTrigger() {
     .create();
   
   console.log(`[createWeekdaysTrigger] 平日判定付き1日1回${hour}時の自動実行トリガーを作成`);
+}
+
+/**
+ * 平日のみ実行する自動タスク抽出（平日判定付き）
+ */
+function autoTaskExtractionWeekdays() {
+  console.log('[autoTaskExtractionWeekdays] 平日判定付き自動実行開始');
+  
+  try {
+    const now = new Date();
+    const dayOfWeek = now.getDay(); // 0=日曜日, 1=月曜日, ..., 6=土曜日
+    
+    console.log(`[autoTaskExtractionWeekdays] 現在の曜日: ${dayOfWeek} (0=日, 1=月, ..., 6=土)`);
+    
+    // 平日判定（月曜日=1 から 金曜日=5）
+    if (dayOfWeek >= 1 && dayOfWeek <= 5) {
+      console.log('[autoTaskExtractionWeekdays] 平日のため実行します');
+      return autoTaskExtraction();
+    } else {
+      console.log('[autoTaskExtractionWeekdays] 休日のためスキップします');
+      return {
+        success: true,
+        message: '休日のため実行をスキップしました',
+        skipped: true,
+        dayOfWeek: dayOfWeek
+      };
+    }
+    
+  } catch (error) {
+    console.error('[autoTaskExtractionWeekdays] エラー:', error.message);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
 }
 
 /**
