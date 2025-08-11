@@ -121,11 +121,28 @@
     
     updateStatus(`${getMethodName(method)}からタスクを抽出中...`);
     
-    // GAS関数呼び出し
+    // GAS関数呼び出し - WebAppFunctions経由
+    let gasFunction;
+    if (method === 'calendar') {
+      gasFunction = 'transferCalendarEvents';
+    } else if (method === 'gmail') {
+      gasFunction = 'transferGmailMessages';
+    } else if (method === 'voice') {
+      gasFunction = 'processVoiceInput';
+      // 音声の場合は引数が異なる
+      google.script.run
+        .withSuccessHandler(onVoiceProcessingSuccess)
+        .withFailureHandler(onProcessingError)
+        [gasFunction](options.transcription);
+      return;
+    } else {
+      gasFunction = 'runFullTaskExtraction';
+    }
+    
     google.script.run
       .withSuccessHandler(onProcessingSuccess)
       .withFailureHandler(onProcessingError)
-      .manualTaskExtraction(method, options);
+      [gasFunction]();
   }
   
   /**
@@ -140,7 +157,32 @@
     if (result.success) {
       displayResults(result);
     } else {
-      displayError(result.error);
+      displayError(result.error || result.errors?.[0] || 'エラーが発生しました');
+    }
+  }
+  
+  /**
+   * 音声処理成功時のコールバック
+   */
+  function onVoiceProcessingSuccess(result) {
+    console.log('音声処理成功:', result);
+    
+    document.getElementById('processing').style.display = 'none';
+    document.getElementById('results').style.display = 'block';
+    
+    if (result.success) {
+      // 音声入力用の結果表示
+      const voiceResult = {
+        success: true,
+        tasks: [result.task],
+        transferred: 1,
+        skipped: 0,
+        processed: 1,
+        message: 'タスクを作成しました'
+      };
+      displayResults(voiceResult);
+    } else {
+      displayError(result.error || 'タスク作成に失敗しました');
     }
   }
   
@@ -162,26 +204,40 @@
   function displayResults(result) {
     const content = document.getElementById('result-content');
     
+    const processed = result.processed || 0;
+    const transferred = result.transferred || 0;
+    const skipped = result.skipped || 0;
+    
     if (result.tasks && result.tasks.length > 0) {
       content.innerHTML = `
         <div class="success">
           <h4>✅ 処理完了</h4>
-          <p>${result.message}</p>
+          <p>処理件数: ${processed}件、作成: ${transferred}件、スキップ: ${skipped}件</p>
           <div class="task-list">
             ${result.tasks.map(task => `
               <div class="task-item">
                 <div>
-                  <strong>${task.title}</strong>
+                  <strong>${task.title || 'タスク'}</strong>
                   ${task.due_date ? `<div class="due-date">期日: ${formatDate(task.due_date)}</div>` : ''}
+                  ${task.context ? `<div class="task-context">${task.context}</div>` : ''}
                 </div>
                 <div>
-                  <span class="priority priority-${task.priority}">${task.priority}</span>
+                  <span class="priority priority-${task.priority || '中'}">${task.priority || '中'}</span>
                   ${task.created ? '<span style="color: #10b981; font-size: 12px;">✓ 作成済み</span>' : 
                     task.skipped ? '<span style="color: #f59e0b; font-size: 12px;">⚠ 重複スキップ</span>' : ''}
                 </div>
               </div>
             `).join('')}
           </div>
+        </div>
+        <button onclick="resetUI()" class="reset-btn">新しい処理を開始</button>
+      `;
+    } else if (transferred > 0 || skipped > 0) {
+      content.innerHTML = `
+        <div class="success">
+          <h4>✅ 処理完了</h4>
+          <p>処理件数: ${processed}件、作成: ${transferred}件、スキップ: ${skipped}件</p>
+          <p>詳細なタスクリストはNotionで確認してください</p>
         </div>
         <button onclick="resetUI()" class="reset-btn">新しい処理を開始</button>
       `;

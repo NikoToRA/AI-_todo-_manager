@@ -148,7 +148,7 @@ function testDuplicateChecker() {
   try {
     const config = ConfigManager.getConfig();
     const notionClient = new NotionClient(config);
-    const duplicateChecker = new DuplicateChecker(notionClient);
+    const duplicateChecker = new TaskDuplicateChecker(notionClient);
     
     // テストタスク
     const newTask = {

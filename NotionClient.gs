@@ -94,13 +94,23 @@ class NotionClient {
         };
       }
       
-      // 元イベント設定
-      if (taskData.original_event) {
-        properties['original_event'] = {
+      // 元イベント設定（contextフィールドに統合）
+      if (taskData.original_event && !taskData.context) {
+        properties['context'] = {
           'rich_text': [
             {
               'text': {
-                'content': taskData.original_event
+                'content': `元イベント: ${taskData.original_event}`
+              }
+            }
+          ]
+        };
+      } else if (taskData.original_event && taskData.context) {
+        properties['context'] = {
+          'rich_text': [
+            {
+              'text': {
+                'content': `${taskData.context} | 元イベント: ${taskData.original_event}`
               }
             }
           ]
@@ -430,26 +440,55 @@ class NotionClient {
       
       var task = {
         id: page.id,
-        url: page.url
+        url: page.url,
+        title: null // 明示的にnullで初期化
       };
       
-      // タイトル（複数のプロパティ名を試行）
+      // タイトル取得（複数のプロパティ名を試行）
+      var titleFound = false;
+      
+      // 1. 'title'プロパティを確認
       if (properties.title && properties.title.title && properties.title.title.length > 0) {
         task.title = properties.title.title[0].text.content;
-      } else if (properties.Name && properties.Name.title && properties.Name.title.length > 0) {
+        titleFound = true;
+      }
+      // 2. 'Name'プロパティを確認
+      else if (properties.Name && properties.Name.title && properties.Name.title.length > 0) {
         task.title = properties.Name.title[0].text.content;
-      } else if (properties['タイトル'] && properties['タイトル'].title && properties['タイトル'].title.length > 0) {
+        titleFound = true;
+      }
+      // 3. '名前'プロパティを確認
+      else if (properties['名前'] && properties['名前'].title && properties['名前'].title.length > 0) {
+        task.title = properties['名前'].title[0].text.content;
+        titleFound = true;
+      }
+      // 4. 'タイトル'プロパティを確認
+      else if (properties['タイトル'] && properties['タイトル'].title && properties['タイトル'].title.length > 0) {
         task.title = properties['タイトル'].title[0].text.content;
-      } else {
-        // デバッグ: 利用可能なプロパティを確認
-        console.log('タイトルプロパティが見つかりません。利用可能なプロパティ:', Object.keys(properties));
-        // URLからタイトルを推測（緊急対応）
-        var urlParts = page.url.split('/');
-        var lastPart = urlParts[urlParts.length - 1];
-        if (lastPart && lastPart.length > 32) {
-          // URLの最後の部分からタイトルを推測
-          task.title = 'Unknown Title';
+        titleFound = true;
+      }
+      
+      // タイトルが見つからない場合の処理
+      if (!titleFound) {
+        // 利用可能なタイトル系プロパティを探す
+        var titleProperties = Object.keys(properties).filter(function(key) {
+          return properties[key].type === 'title' || 
+                 (properties[key].title && Array.isArray(properties[key].title));
+        });
+        
+        if (titleProperties.length > 0) {
+          var firstTitleProp = properties[titleProperties[0]];
+          if (firstTitleProp.title && firstTitleProp.title.length > 0) {
+            task.title = firstTitleProp.title[0].text.content;
+            titleFound = true;
+          }
         }
+      }
+      
+      // それでもタイトルが見つからない場合はnullのまま（重複チェックから除外される）
+      if (!titleFound) {
+        console.log('[NotionClient] タイトルが見つからないページをスキップ:', page.id);
+        return null; // タイトルがないページは無効として扱う
       }
       
       // 優先度

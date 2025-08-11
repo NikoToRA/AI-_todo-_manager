@@ -1,15 +1,32 @@
 /**
- * AI駆動タスク管理システム - メインエントリーポイント
- * ES5互換版
+ * AI駆動タスク管理システム - デプロイ用メインファイル
+ * Google Apps Script ES5互換版
+ * 
+ * 必要なファイル構成:
+ * - CodeDeploy.gs (このファイル)
+ * - config.gs
+ * - NotionClient.gs 
+ * - TaskExtractorES5.gs
+ * - DuplicateCheckerES5.gs
+ * - Utils.gs
+ * - BasicTests.gs
  */
 
 /**
- * メインの自動実行関数
+ * メイン実行関数
+ */
+function main() {
+  return runTaskExtraction();
+}
+
+/**
+ * システムの主要実行関数
  */
 function runTaskExtraction() {
   console.log('=== AI駆動タスク管理システム実行開始 ===');
   
   try {
+    // 設定チェック
     var config = ConfigManager.getConfig();
     var validation = ConfigManager.validateConfig();
     
@@ -355,15 +372,36 @@ function checkSystemStatus() {
 }
 
 /**
- * エントリーポイント（旧関数との互換性）
+ * 簡単実行（エントリーポイント）
  */
-function main() {
+function run() {
   return runTaskExtraction();
 }
 
 /**
- * 簡単実行
+ * 定期実行用（トリガー設定時に使用）
  */
-function run() {
-  return runTaskExtraction();
+function scheduledExecution() {
+  console.log('=== 定期実行開始 ===');
+  
+  try {
+    var result = runTaskExtraction();
+    
+    if (result.success) {
+      console.log('✅ 定期実行完了');
+      console.log('- 作成タスク:', result.results.totalCreated);
+      console.log('- スキップタスク:', result.results.totalSkipped);
+    } else {
+      console.error('❌ 定期実行失敗:', result.error);
+    }
+    
+    return result;
+    
+  } catch (error) {
+    console.error('❌ 定期実行エラー:', error.message);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
 }

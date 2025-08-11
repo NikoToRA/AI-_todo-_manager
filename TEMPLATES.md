@@ -193,7 +193,7 @@ function testIntegrationFeature() {
     console.log(`抽出されたタスク数: ${tasks.length}`);
     
     // ステップ2: 重複チェック
-    const duplicateChecker = new DuplicateChecker(config);
+    const duplicateChecker = new TaskDuplicateChecker(config);
     const filteredTasks = tasks.filter(task => !duplicateChecker.checkBasicDuplicate(task));
     console.log(`重複除去後のタスク数: ${filteredTasks.length}`);
     

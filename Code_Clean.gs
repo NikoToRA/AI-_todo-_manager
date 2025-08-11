@@ -195,12 +195,12 @@ function manualTaskExtraction(source = 'calendar', options = {}) {
     var result;
     
     if (source === 'calendar') {
-      result = transferCalendarEvents();
+      result = runCalendarOnly();
     } else if (source === 'gmail') {
-      result = transferGmailMessages();
+      result = runGmailOnly();
     } else if (source === 'both') {
-      var calendarResult = transferCalendarEvents();
-      var gmailResult = transferGmailMessages();
+      var calendarResult = runCalendarOnly();
+      var gmailResult = runGmailOnly();
       
       result = {
         success: calendarResult.success && gmailResult.success,
@@ -277,7 +277,7 @@ function autoTaskExtraction() {
     if (config.enableCalendarAnalysis !== false) {
       console.log('[autoTaskExtraction] カレンダー処理開始');
       try {
-        results.calendar = transferCalendarEvents();
+        results.calendar = runCalendarOnly();
         if (results.calendar.success) {
           results.totalProcessed += results.calendar.processed;
           results.totalCreated += results.calendar.transferred;
@@ -295,7 +295,7 @@ function autoTaskExtraction() {
     if (config.enableGmailAnalysis !== false) {
       console.log('[autoTaskExtraction] Gmail処理開始');
       try {
-        results.gmail = transferGmailMessages();
+        results.gmail = runGmailOnly();
         if (results.gmail.success) {
           results.totalProcessed += results.gmail.processed;
           results.totalCreated += results.gmail.transferred;
