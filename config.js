@@ -211,9 +211,9 @@ class ConfigManager {
       const filterHeaders = [
         ['設定項目', '値', '説明', '例'],
         ['', '', '=== 基本設定 ===', ''],
-        ['GMAIL_SEARCH_QUERY', 'in:inbox -is:archived newer_than:3d', 'Gmail検索クエリ（既読・未読含む）', 'in:inbox newer_than:7d'],
-        ['GMAIL_MAX_RESULTS', '30', '最大取得件数', '10, 20, 50'],
-        ['GMAIL_DATE_RANGE_DAYS', '3', 'メール調査期間（日数）', '1, 3, 7, 14'],
+        ['GMAIL_SEARCH_QUERY', 'in:inbox -is:archived', 'Gmail検索クエリ', 'in:inbox newer_than:3d'],
+        ['GMAIL_MAX_RESULTS', '50', '最大取得件数', '10, 20, 100'],
+        ['GMAIL_DATE_RANGE_DAYS', '7', 'メール調査期間（日数）', '1, 3, 7, 14'],
         ['GMAIL_AUTO_EXCLUDE_CATEGORIES', 'true', '自動除外カテゴリ', 'true, false'],
         ['GMAIL_MIN_SUBJECT_LENGTH', '3', '最小件名文字数', '1, 3, 5'],
         ['', '', '=== 除外設定（不要なメールを除外） ===', ''],

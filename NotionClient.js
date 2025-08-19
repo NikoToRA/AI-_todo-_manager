@@ -729,3 +729,242 @@ function showNotionSetupGuide() {
   console.log('');
   console.log('=== セットアップガイド完了 ===');
 }
+
+/**
+ * 処理済みタグがついているかチェック
+ * @param {string} originalEvent 元のイベント名
+ * @param {string} eventDate イベント日付（YYYY-MM-DD形式）
+ * @returns {boolean} 処理済みの場合true
+ */
+NotionClient.prototype.isAlreadyProcessed = function(originalEvent, eventDate) {
+  try {
+    console.log('[NotionClient] 処理済みチェック: "' + originalEvent + '" (' + eventDate + ')');
+    
+    // データベースIDのクリーンアップ
+    var cleanDatabaseId = this.databaseId.replace(/\n/g, '').trim();
+    var url = this.baseUrl + '/databases/' + cleanDatabaseId + '/query';
+    
+    // 検索クエリ: 同じoriginal_eventとdue_dateを持つタスクを検索
+    var searchFilter = {
+      'and': [
+        {
+          'property': 'type',
+          'select': {
+            'equals': 'task'
+          }
+        },
+        {
+          'property': 'source',
+          'select': {
+            'equals': 'calendar'
+          }
+        }
+      ]
+    };
+    
+    // original_eventプロパティが存在する場合
+    if (originalEvent && originalEvent.trim().length > 0) {
+      searchFilter.and.push({
+        'property': 'original_event',
+        'rich_text': {
+          'equals': originalEvent
+        }
+      });
+    }
+    
+    // due_dateプロパティが存在する場合
+    if (eventDate && eventDate.trim().length > 0) {
+      searchFilter.and.push({
+        'property': 'due_date',
+        'date': {
+          'equals': eventDate
+        }
+      });
+    }
+    
+    var payload = {
+      'filter': searchFilter,
+      'page_size': 10
+    };
+    
+    var options = {
+      'method': 'POST',
+      'headers': {
+        'Authorization': 'Bearer ' + this.token,
+        'Content-Type': 'application/json',
+        'Notion-Version': this.version
+      },
+      'payload': JSON.stringify(payload),
+      'muteHttpExceptions': true,
+      'timeout': 10000
+    };
+    
+    console.log('[NotionClient] Notion検索実行中...');
+    var response = UrlFetchApp.fetch(url, options);
+    var responseCode = response.getResponseCode();
+    
+    if (responseCode !== 200) {
+      console.warn('[NotionClient] Notion検索警告 (Code: ' + responseCode + ')');
+      return false; // エラー時は未処理として扱う
+    }
+    
+    var data = JSON.parse(response.getContentText());
+    
+    if (!data.results) {
+      console.log('[NotionClient] Notion検索結果なし');
+      return false;
+    }
+    
+    var matchedTasks = data.results.length;
+    
+    if (matchedTasks > 0) {
+      console.log('[NotionClient] ✓ 処理済みタスク発見: ' + matchedTasks + '件');
+      console.log('[NotionClient] → スキップ: "' + originalEvent + '"');
+      return true;
+    }
+    
+    console.log('[NotionClient] ✗ 未処理 (Notion): "' + originalEvent + '"');
+    return false;
+    
+  } catch (error) {
+    console.error('[NotionClient] 処理済みチェックエラー:', error.message);
+    // エラー時は安全側に倒して未処理とする（重複よりも取りこぼしを防ぐ）
+    return false;
+  }
+};
+
+/**
+ * カスタムフィルタでタスクを検索
+ * @param {Object} filter 検索フィルタ
+ * @returns {Array} マッチしたタスク配列
+ */
+NotionClient.prototype.queryTasks = function(filter) {
+  try {
+    console.log('[NotionClient] カスタムクエリ実行開始');
+    
+    // データベースIDのクリーンアップ
+    var cleanDatabaseId = this.databaseId.replace(/\n/g, '').trim();
+    var url = this.baseUrl + '/databases/' + cleanDatabaseId + '/query';
+    
+    var payload = {
+      'filter': filter,
+      'page_size': 100,
+      'sorts': [
+        {
+          'property': 'created_time',
+          'direction': 'descending'
+        }
+      ]
+    };
+    
+    var options = {
+      'method': 'POST',
+      'headers': {
+        'Authorization': 'Bearer ' + this.token,
+        'Content-Type': 'application/json',
+        'Notion-Version': this.version
+      },
+      'payload': JSON.stringify(payload),
+      'muteHttpExceptions': true,
+      'timeout': 15000
+    };
+    
+    var response = UrlFetchApp.fetch(url, options);
+    var responseCode = response.getResponseCode();
+    
+    if (responseCode !== 200) {
+      var errorText = response.getContentText();
+      console.error('[NotionClient] Notionクエリエラー (Code: ' + responseCode + '): ' + errorText);
+      return [];
+    }
+    
+    var data = JSON.parse(response.getContentText());
+    
+    if (!data.results || !Array.isArray(data.results)) {
+      console.warn('[NotionClient] Notionクエリ: 無効なレスポンス形式');
+      return [];
+    }
+    
+    var tasks = [];
+    for (var i = 0; i < data.results.length; i++) {
+      var page = data.results[i];
+      
+      if (page.properties) {
+        var task = this.parseTaskFromPage(page);
+        if (task) {
+          tasks.push(task);
+        }
+      }
+    }
+    
+    console.log('[NotionClient] カスタムクエリ完了: ' + tasks.length + '件');
+    return tasks;
+    
+  } catch (error) {
+    console.error('[NotionClient] カスタムクエリエラー:', error.message);
+    return [];
+  }
+};
+
+/**
+ * NotionページからタスクオブジェクトにParse
+ * @param {Object} page Notionページオブジェクト
+ * @returns {Object} タスクオブジェクト
+ */
+NotionClient.prototype.parseTaskFromPage = function(page) {
+  try {
+    var task = {
+      id: page.id,
+      url: page.url,
+      created_time: page.created_time
+    };
+    
+    var props = page.properties;
+    
+    // Title
+    if (props.title && props.title.title && props.title.title.length > 0) {
+      task.title = props.title.title[0].plain_text || '';
+    }
+    
+    // Type
+    if (props.type && props.type.select && props.type.select.name) {
+      task.type = props.type.select.name;
+    }
+    
+    // Priority
+    if (props.priority && props.priority.select && props.priority.select.name) {
+      task.priority = props.priority.select.name;
+    }
+    
+    // Due Date
+    if (props.due_date && props.due_date.date && props.due_date.date.start) {
+      task.due_date = props.due_date.date.start;
+    }
+    
+    // Source
+    if (props.source && props.source.select && props.source.select.name) {
+      task.source = props.source.select.name;
+    }
+    
+    // Status
+    if (props.status && props.status.select && props.status.select.name) {
+      task.status = props.status.select.name;
+    }
+    
+    // Original Event
+    if (props.original_event && props.original_event.rich_text && props.original_event.rich_text.length > 0) {
+      task.original_event = props.original_event.rich_text[0].plain_text || '';
+    }
+    
+    // Context
+    if (props.context && props.context.rich_text && props.context.rich_text.length > 0) {
+      task.context = props.context.rich_text[0].plain_text || '';
+    }
+    
+    return task;
+    
+  } catch (error) {
+    console.error('[NotionClient] ページパースエラー:', error.message);
+    return null;
+  }
+};

@@ -5,6 +5,7 @@ function TaskExtractor(config) {
   this.config = config;
   this.notionClient = new NotionClient(config.notionToken, config.notionDatabaseId);
   this.duplicateChecker = new TaskDuplicateChecker(this.notionClient);
+  this.calendarUpdater = new CalendarEventUpdater();
   
   // ProcessedTrackerが存在しない場合は基本的な管理機能のみ
   this.processedTracker = null;
@@ -48,9 +49,27 @@ TaskExtractor.prototype.extractFromCalendar = function(startDate, endDate) {
       var event = allEvents[j];
       console.log('[TaskExtractor] イベント処理中: ' + event.getTitle());
       
-      // 処理済みチェック（ProcessedTrackerが使える場合のみ）
+      // 処理済みチェック（カレンダーイベント直接チェック + Notionタグベース + ProcessedTracker）
+      var eventDate = event.getStartTime().toISOString().split('T')[0]; // YYYY-MM-DD形式
+      var originalEvent = event.getTitle();
+      
+      // 1. カレンダーイベント自体の処理済みタグチェック（最優先）
+      if (this.calendarUpdater.isEventProcessed(event)) {
+        console.log('[TaskExtractor] スキップ（カレンダー処理済み）: ' + originalEvent + ' (' + eventDate + ')');
+        skippedCount++;
+        continue;
+      }
+      
+      // 2. Notionの処理済みタグチェック（二番目）
+      if (this.notionClient.isAlreadyProcessed(originalEvent, eventDate)) {
+        console.log('[TaskExtractor] スキップ（Notion処理済みタグ）: ' + originalEvent + ' (' + eventDate + ')');
+        skippedCount++;
+        continue;
+      }
+      
+      // 3. ProcessedTrackerによるチェック（従来機能）
       if (this.processedTracker && this.processedTracker.isCalendarEventProcessed(event)) {
-        console.log('[TaskExtractor] スキップ（処理済み）: ' + event.getTitle());
+        console.log('[TaskExtractor] スキップ（ProcessedTracker）: ' + event.getTitle());
         skippedCount++;
         continue;
       }
@@ -76,11 +95,16 @@ TaskExtractor.prototype.extractFromCalendar = function(startDate, endDate) {
     // 重複チェックと Notion登録
     var processedTasks = this.processAndCreateTasks(tasks, 'calendar');
     
+    // 成功したタスクに対応するカレンダーイベントに処理済みタグを追加
+    var calendarUpdateStats = this.updateCalendarEventsAfterProcessing(processedTasks, allEvents);
+    
     console.log('[TaskExtractor.extractFromCalendar] 完了:');
     console.log('  - 処理したイベント: ' + processedCount + '件');
     console.log('  - スキップしたイベント: ' + skippedCount + '件');
     console.log('  - 抽出したタスク: ' + tasks.length + '件');
     console.log('  - 最終的に処理したタスク: ' + processedTasks.length + '件');
+    console.log('  - カレンダー更新成功: ' + (calendarUpdateStats.processed || 0) + '件');
+    console.log('  - カレンダー更新エラー: ' + (calendarUpdateStats.errors || 0) + '件');
     
     return processedTasks;
     
@@ -95,12 +119,8 @@ TaskExtractor.prototype.extractFromCalendar = function(startDate, endDate) {
  */
 TaskExtractor.prototype.extractFromGmail = function(query, maxResults) {
   try {
-    // 設定から検索クエリを構築
-    var gmailDateRangeDays = this.config.gmailDateRangeDays || 3;
-    var gmailSearchQuery = this.config.gmailSearchQuery || ('in:inbox -is:archived newer_than:' + gmailDateRangeDays + 'd');
-    
-    query = query || gmailSearchQuery;
-    maxResults = maxResults || (this.config.gmailMaxResults || 30);
+    query = query || 'is:unread';
+    maxResults = maxResults || 50;
     
     console.log('[TaskExtractor.extractFromGmail] 開始: query=' + query);
     
@@ -221,15 +241,11 @@ TaskExtractor.prototype.analyzeGmailMessage = function(message) {
     }
   }
   
-  // 重要度判定（既読・未読に関係なく）
-  var priority = this.determineEmailPriority(message);
-  var isImportant = (priority === '高' || priority === '緊急');
-  
-  if (hasActionKeyword || message.isUnread() || isImportant) {
+  if (hasActionKeyword || message.isUnread()) {
     var task = {
       title: this.generateTaskFromEmail(subject, body),
       type: 'task',
-      priority: priority,
+      priority: this.determineEmailPriority(message),
       due_date: this.extractDueDateFromEmail(body),
       source: 'gmail',
       status: '未着手',
@@ -413,4 +429,79 @@ TaskExtractor.prototype.extractDueDateFromEmail = function(body) {
   }
   
   return null;
+};
+
+/**
+ * 処理済みタスクに対応するカレンダーイベントに処理済みタグを追加
+ */
+TaskExtractor.prototype.updateCalendarEventsAfterProcessing = function(processedTasks, allEvents) {
+  var stats = {
+    total: 0,
+    processed: 0,
+    skipped: 0,
+    errors: 0
+  };
+  
+  try {
+    console.log('[TaskExtractor] カレンダーイベント更新開始');
+    
+    // 成功したタスクからイベント名を抽出
+    var successfulEventTitles = [];
+    for (var i = 0; i < processedTasks.length; i++) {
+      var task = processedTasks[i];
+      if (task.created && task.original_event) {
+        successfulEventTitles.push(task.original_event);
+      }
+    }
+    
+    console.log('[TaskExtractor] 更新対象イベント数: ' + successfulEventTitles.length + '件');
+    
+    // 対応するカレンダーイベントを検索してタグ追加
+    for (var j = 0; j < allEvents.length; j++) {
+      var event = allEvents[j];
+      var eventTitle = event.getTitle();
+      
+      stats.total++;
+      
+      // 成功したタスクに対応するイベントかチェック
+      var shouldUpdate = false;
+      for (var k = 0; k < successfulEventTitles.length; k++) {
+        if (eventTitle === successfulEventTitles[k]) {
+          shouldUpdate = true;
+          break;
+        }
+      }
+      
+      if (shouldUpdate) {
+        try {
+          var success = this.calendarUpdater.markEventAsProcessed(event);
+          if (success) {
+            stats.processed++;
+            console.log('[TaskExtractor] ✓ カレンダー更新成功: ' + eventTitle);
+          } else {
+            stats.errors++;
+            console.log('[TaskExtractor] ❌ カレンダー更新失敗: ' + eventTitle);
+          }
+        } catch (error) {
+          stats.errors++;
+          console.error('[TaskExtractor] カレンダー更新エラー: ' + eventTitle + ' - ' + error.message);
+        }
+      } else {
+        stats.skipped++;
+      }
+    }
+    
+    console.log('[TaskExtractor] カレンダー更新完了:');
+    console.log('  - 総イベント数: ' + stats.total);
+    console.log('  - 更新成功: ' + stats.processed);
+    console.log('  - スキップ: ' + stats.skipped);
+    console.log('  - エラー: ' + stats.errors);
+    
+    return stats;
+    
+  } catch (error) {
+    console.error('[TaskExtractor] カレンダー更新処理エラー:', error.message);
+    stats.errors = stats.total;
+    return stats;
+  }
 };
