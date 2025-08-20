@@ -740,52 +740,101 @@ NotionClient.prototype.isAlreadyProcessed = function(originalEvent, eventDate) {
   try {
     console.log('[NotionClient] 処理済みチェック: "' + originalEvent + '" (' + eventDate + ')');
     
-    // データベースIDのクリーンアップ
-    var cleanDatabaseId = this.databaseId.replace(/\n/g, '').trim();
-    var url = this.baseUrl + '/databases/' + cleanDatabaseId + '/query';
+    if (!originalEvent || originalEvent.trim().length === 0) {
+      return false;
+    }
     
-    // 検索クエリ: 同じoriginal_eventとdue_dateを持つタスクを検索
-    var searchFilter = {
+    // 1. 日付付きタイトルでの完全一致検索
+    if (eventDate) {
+      var dateString = ' (' + eventDate + ')';
+      var exactTitleFilter = {
+        'and': [
+          {
+            'property': 'type',
+            'select': { 'equals': 'task' }
+          },
+          {
+            'property': 'source',
+            'select': { 'equals': 'calendar' }
+          },
+          {
+            'property': 'Name',
+            'title': { 'equals': originalEvent + dateString }
+          }
+        ]
+      };
+      
+      console.log('[NotionClient] 完全一致検索: "' + originalEvent + dateString + '"');
+      var exactResult = this._executeQuery(exactTitleFilter);
+      if (exactResult && exactResult.length > 0) {
+        console.log('[NotionClient] ✓ 完全一致タスク発見: ' + exactResult.length + '件');
+        return true;
+      }
+    }
+    
+    // 2. 元イベント名での部分一致検索
+    var partialTitleFilter = {
       'and': [
         {
           'property': 'type',
-          'select': {
-            'equals': 'task'
-          }
+          'select': { 'equals': 'task' }
         },
         {
-          'property': 'source',
-          'select': {
-            'equals': 'calendar'
-          }
+          'property': 'source', 
+          'select': { 'equals': 'calendar' }
+        },
+        {
+          'property': 'Name',
+          'title': { 'contains': originalEvent }
         }
       ]
     };
     
-    // original_eventプロパティが存在する場合
-    if (originalEvent && originalEvent.trim().length > 0) {
-      searchFilter.and.push({
-        'property': 'original_event',
-        'rich_text': {
-          'equals': originalEvent
+    console.log('[NotionClient] 部分一致検索: "' + originalEvent + '"');
+    var result = this._executeQuery(partialTitleFilter);
+    
+    if (result && result.length > 0) {
+      console.log('[NotionClient] 部分一致タスク発見: ' + result.length + '件');
+      
+      // 日付一致確認
+      if (eventDate) {
+        for (var i = 0; i < result.length; i++) {
+          var task = result[i];
+          if (task.properties && task.properties['日付'] && task.properties['日付'].date) {
+            var taskDate = task.properties['日付'].date.start;
+            // 日付の形式を統一して比較
+            var normalizedTaskDate = taskDate.split('T')[0]; // YYYY-MM-DD部分のみ
+            if (normalizedTaskDate === eventDate) {
+              console.log('[NotionClient] ✓ 同一日付タスク確認: ' + normalizedTaskDate);
+              return true;
+            }
+          }
         }
-      });
+        console.log('[NotionClient] 部分一致あるが日付不一致 - 未処理扱い');
+      } else {
+        return true; // 日付情報がない場合はタイトル一致で重複とみなす
+      }
     }
     
-    // due_dateプロパティが存在する場合
-    if (eventDate && eventDate.trim().length > 0) {
-      searchFilter.and.push({
-        'property': 'due_date',
-        'date': {
-          'equals': eventDate
-        }
-      });
-    }
+    console.log('[NotionClient] ✗ 未処理 (Notion): "' + originalEvent + '"');
+    return false;
     
-    var payload = {
-      'filter': searchFilter,
-      'page_size': 10
-    };
+  } catch (error) {
+    console.error('[NotionClient] 処理済みチェックエラー:', error.message);
+    // エラー時は安全側に倒して未処理とする（重複よりも取りこぼしを防ぐ）
+    return false;
+  }
+};
+
+/**
+ * Notionクエリ実行ヘルパーメソッド
+ * @private
+ */
+NotionClient.prototype._executeQuery = function(filter) {
+  try {
+    var cleanDatabaseId = this.databaseId.replace(/\n/g, '').trim();
+    var url = this.baseUrl + '/databases/' + cleanDatabaseId + '/query';
+    var payload = { 'filter': filter, 'page_size': 10 };
     
     var options = {
       'method': 'POST',
@@ -799,37 +848,17 @@ NotionClient.prototype.isAlreadyProcessed = function(originalEvent, eventDate) {
       'timeout': 10000
     };
     
-    console.log('[NotionClient] Notion検索実行中...');
     var response = UrlFetchApp.fetch(url, options);
-    var responseCode = response.getResponseCode();
-    
-    if (responseCode !== 200) {
-      console.warn('[NotionClient] Notion検索警告 (Code: ' + responseCode + ')');
-      return false; // エラー時は未処理として扱う
+    if (response.getResponseCode() === 200) {
+      var data = JSON.parse(response.getContentText());
+      return data.results || [];
+    } else {
+      console.warn('[NotionClient] クエリ失敗 (Code: ' + response.getResponseCode() + ')');
+      return null;
     }
-    
-    var data = JSON.parse(response.getContentText());
-    
-    if (!data.results) {
-      console.log('[NotionClient] Notion検索結果なし');
-      return false;
-    }
-    
-    var matchedTasks = data.results.length;
-    
-    if (matchedTasks > 0) {
-      console.log('[NotionClient] ✓ 処理済みタスク発見: ' + matchedTasks + '件');
-      console.log('[NotionClient] → スキップ: "' + originalEvent + '"');
-      return true;
-    }
-    
-    console.log('[NotionClient] ✗ 未処理 (Notion): "' + originalEvent + '"');
-    return false;
-    
   } catch (error) {
-    console.error('[NotionClient] 処理済みチェックエラー:', error.message);
-    // エラー時は安全側に倒して未処理とする（重複よりも取りこぼしを防ぐ）
-    return false;
+    console.error('[NotionClient] クエリ実行エラー:', error.message);
+    return null;
   }
 };
 

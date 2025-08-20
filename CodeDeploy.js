@@ -46,10 +46,10 @@ function runTaskExtraction() {
       errors: []
     };
     
-    // 日付範囲を計算
+    // 日付範囲を計算（その日から1週間）
+    var startDate = new Date(); // 今日から
     var endDate = new Date();
-    var startDate = new Date();
-    startDate.setDate(startDate.getDate() - config.dataRangeDays);
+    endDate.setDate(endDate.getDate() + 7); // 1週間後まで
     
     // TaskExtractorを初期化
     var taskExtractor = new TaskExtractor(config);
@@ -164,9 +164,9 @@ function runCalendarOnly() {
     var config = ConfigManager.getConfig();
     var taskExtractor = new TaskExtractor(config);
     
+    var startDate = new Date(); // 今日から
     var endDate = new Date();
-    var startDate = new Date();
-    startDate.setDate(startDate.getDate() - 7); // 1週間前から
+    endDate.setDate(endDate.getDate() + 7); // 1週間後まで
     
     var tasks = taskExtractor.extractFromCalendar(startDate, endDate);
     

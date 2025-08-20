@@ -17,13 +17,13 @@ function TaskExtractor(config) {
 }
 
 /**
- * カレンダーからタスクを抽出
+ * カレンダーからタスクを抽出（最適化版）
  */
 TaskExtractor.prototype.extractFromCalendar = function(startDate, endDate) {
   try {
     console.log('[TaskExtractor.extractFromCalendar] 開始: ' + startDate + ' - ' + endDate);
     
-    // 全カレンダーからイベントを取得
+    // 1. 全カレンダーからイベントを取得
     var calendars = CalendarApp.getAllCalendars();
     console.log('[TaskExtractor] 検索対象カレンダー数: ' + calendars.length + '件');
     
@@ -41,68 +41,77 @@ TaskExtractor.prototype.extractFromCalendar = function(startDate, endDate) {
       }
     }
     
+    // 2. イベント処理
     var tasks = [];
-    var processedCount = 0;
+    var processedEvents = []; // 処理したイベントを追跡
     var skippedCount = 0;
     
     for (var j = 0; j < allEvents.length; j++) {
       var event = allEvents[j];
-      console.log('[TaskExtractor] イベント処理中: ' + event.getTitle());
+      var eventTitle = event.getTitle();
+      var eventDate = event.getStartTime().toISOString().split('T')[0];
       
-      // 処理済みチェック（カレンダーイベント直接チェック + Notionタグベース + ProcessedTracker）
-      var eventDate = event.getStartTime().toISOString().split('T')[0]; // YYYY-MM-DD形式
-      var originalEvent = event.getTitle();
+      console.log('[TaskExtractor] イベント処理中: ' + eventTitle);
       
-      // 1. カレンダーイベント自体の処理済みタグチェック（最優先）
+      // カレンダー処理済みチェック（最優先）
       if (this.calendarUpdater.isEventProcessed(event)) {
-        console.log('[TaskExtractor] スキップ（カレンダー処理済み）: ' + originalEvent + ' (' + eventDate + ')');
+        console.log('[TaskExtractor] スキップ（カレンダー処理済み）: ' + eventTitle);
         skippedCount++;
         continue;
       }
       
-      // 2. Notionの処理済みタグチェック（二番目）
-      if (this.notionClient.isAlreadyProcessed(originalEvent, eventDate)) {
-        console.log('[TaskExtractor] スキップ（Notion処理済みタグ）: ' + originalEvent + ' (' + eventDate + ')');
+      // Notion処理済みチェック
+      if (this.notionClient.isAlreadyProcessed(eventTitle, eventDate)) {
+        console.log('[TaskExtractor] スキップ（Notion処理済み）: ' + eventTitle);
+        // 処理済みなのにカレンダーマークがない場合はマークを追加
+        try {
+          this.calendarUpdater.markEventAsProcessed(event);
+        } catch (markError) {
+          console.warn('[TaskExtractor] カレンダーマーク追加エラー: ' + markError.message);
+        }
         skippedCount++;
         continue;
       }
       
-      // 3. ProcessedTrackerによるチェック（従来機能）
+      // ProcessedTrackerチェック（従来機能との互換性）
       if (this.processedTracker && this.processedTracker.isCalendarEventProcessed(event)) {
-        console.log('[TaskExtractor] スキップ（ProcessedTracker）: ' + event.getTitle());
+        console.log('[TaskExtractor] スキップ（ProcessedTracker）: ' + eventTitle);
         skippedCount++;
         continue;
       }
       
+      // タスク抽出
       var extractedTasks = this.analyzeCalendarEvent(event);
-      
       if (extractedTasks.length > 0) {
         tasks = tasks.concat(extractedTasks);
+        processedEvents.push(event); // 処理対象として記録
         
-        // 処理済みマークを追加（ProcessedTrackerが使える場合のみ）
+        // ProcessedTrackerが使える場合のマーク
         if (this.processedTracker) {
           this.processedTracker.markCalendarEventAsProcessed(event, extractedTasks);
-        }
-        processedCount++;
-      } else {
-        // タスクが抽出されなかった場合も処理済みとしてマーク（再処理防止）
-        if (this.processedTracker) {
-          this.processedTracker.markCalendarEventAsProcessed(event, []);
         }
       }
     }
     
-    // 重複チェックと Notion登録
+    // 3. 重複チェックとNotion登録
     var processedTasks = this.processAndCreateTasks(tasks, 'calendar');
     
-    // 成功したタスクに対応するカレンダーイベントに処理済みタグを追加
-    var calendarUpdateStats = this.updateCalendarEventsAfterProcessing(processedTasks, allEvents);
+    // 4. カレンダーイベントの更新（処理対象全てをマーク - 重複でもマーク）
+    var calendarUpdateStats = { processed: 0, errors: 0, skipped: 0, total: 0 };
+    
+    if (processedEvents.length > 0) {
+      console.log('[TaskExtractor] 処理済みイベントにマーク追加開始: ' + processedEvents.length + '件');
+      console.log('[TaskExtractor] 重複チェック結果に関わらず、すべての処理対象イベントをマーク');
+      calendarUpdateStats = this.updateProcessedEvents(processedEvents);
+    } else {
+      console.log('[TaskExtractor] マーク対象イベントなし');
+    }
     
     console.log('[TaskExtractor.extractFromCalendar] 完了:');
-    console.log('  - 処理したイベント: ' + processedCount + '件');
-    console.log('  - スキップしたイベント: ' + skippedCount + '件');
-    console.log('  - 抽出したタスク: ' + tasks.length + '件');
-    console.log('  - 最終的に処理したタスク: ' + processedTasks.length + '件');
+    console.log('  - 処理対象イベント: ' + processedEvents.length + '件');
+    console.log('  - スキップイベント: ' + skippedCount + '件');
+    console.log('  - 抽出タスク: ' + tasks.length + '件');
+    console.log('  - 最終処理タスク: ' + processedTasks.length + '件');
     console.log('  - カレンダー更新成功: ' + (calendarUpdateStats.processed || 0) + '件');
     console.log('  - カレンダー更新エラー: ' + (calendarUpdateStats.errors || 0) + '件');
     
@@ -445,32 +454,33 @@ TaskExtractor.prototype.updateCalendarEventsAfterProcessing = function(processed
   try {
     console.log('[TaskExtractor] カレンダーイベント更新開始');
     
-    // 成功したタスクからイベント名を抽出
-    var successfulEventTitles = [];
+    // 処理したタスクからイベント名を抽出（成功・失敗問わず）
+    var processedEventTitles = [];
     for (var i = 0; i < processedTasks.length; i++) {
       var task = processedTasks[i];
-      if (task.created && task.original_event) {
-        successfulEventTitles.push(task.original_event);
+      if (task.original_event) {
+        processedEventTitles.push(task.original_event);
       }
     }
     
-    console.log('[TaskExtractor] 更新対象イベント数: ' + successfulEventTitles.length + '件');
+    console.log('[TaskExtractor] 更新対象イベント数: ' + processedEventTitles.length + '件');
     
-    // 対応するカレンダーイベントを検索してタグ追加
+    // 全処理対象イベントをマーク
     for (var j = 0; j < allEvents.length; j++) {
       var event = allEvents[j];
       var eventTitle = event.getTitle();
       
       stats.total++;
       
-      // 成功したタスクに対応するイベントかチェック
-      var shouldUpdate = false;
-      for (var k = 0; k < successfulEventTitles.length; k++) {
-        if (eventTitle === successfulEventTitles[k]) {
-          shouldUpdate = true;
-          break;
-        }
+      // 重複防止: 既に処理済みかチェック
+      if (this.calendarUpdater.isEventProcessed(event)) {
+        stats.skipped++;
+        console.log('[TaskExtractor] 既に処理済み: ' + eventTitle);
+        continue;
       }
+      
+      // 処理対象イベントかチェック
+      var shouldUpdate = processedEventTitles.indexOf(eventTitle) !== -1;
       
       if (shouldUpdate) {
         try {
@@ -504,4 +514,39 @@ TaskExtractor.prototype.updateCalendarEventsAfterProcessing = function(processed
     stats.errors = stats.total;
     return stats;
   }
+};
+
+/**
+ * 処理対象イベントを直接更新（新しいヘルパーメソッド）
+ */
+TaskExtractor.prototype.updateProcessedEvents = function(events) {
+  var stats = { total: events.length, processed: 0, errors: 0, skipped: 0 };
+  
+  console.log('[TaskExtractor] 処理済みイベント直接更新開始: ' + events.length + '件');
+  
+  for (var i = 0; i < events.length; i++) {
+    var event = events[i];
+    try {
+      // 既に処理済みかチェック
+      if (this.calendarUpdater.isEventProcessed(event)) {
+        stats.skipped++;
+        continue;
+      }
+      
+      var success = this.calendarUpdater.markEventAsProcessed(event);
+      if (success) {
+        stats.processed++;
+        console.log('[TaskExtractor] ✓ 直接更新成功: ' + event.getTitle());
+      } else {
+        stats.errors++;
+        console.log('[TaskExtractor] ❌ 直接更新失敗: ' + event.getTitle());
+      }
+    } catch (error) {
+      stats.errors++;
+      console.error('[TaskExtractor] 直接更新エラー: ' + error.message);
+    }
+  }
+  
+  console.log('[TaskExtractor] 直接更新統計: 成功=' + stats.processed + ', スキップ=' + stats.skipped + ', エラー=' + stats.errors);
+  return stats;
 };

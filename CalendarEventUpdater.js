@@ -2,7 +2,7 @@
  * カレンダーイベント更新クラス（ES5互換版）
  */
 function CalendarEventUpdater() {
-  this.processedTag = '🤖処理済み AIタスク管理システムで処理済み';
+  this.processedTag = '🤖';
 }
 
 /**

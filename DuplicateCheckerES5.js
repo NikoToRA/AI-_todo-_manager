@@ -105,20 +105,34 @@ TaskDuplicateChecker.prototype.isTitleSimilar = function(title1, title2) {
 };
 
 /**
- * 日程重複チェック
+ * 日程重複チェック（修正版）
  */
 TaskDuplicateChecker.prototype.isDateConflict = function(newTask, existingTask) {
   if (!newTask.due_date || !existingTask.due_date) {
     return false;
   }
   
-  // 同じ日付で類似タイトルの場合は重複とみなす
-  if (this.isSameDate(newTask.due_date, existingTask.due_date)) {
-    var titleSimilarity = Utils.calculateSimilarity(
-      newTask.title.toLowerCase(),
-      existingTask.title.toLowerCase()
-    );
-    return titleSimilarity > 0.6; // より緩い閾値
+  // 同じ日付でなければ重複ではない
+  if (!this.isSameDate(newTask.due_date, existingTask.due_date)) {
+    return false;
+  }
+  
+  // 同じ日付の場合、タイトルの類似度をチェック
+  var newCleanTitle = this.removeDateFromTitle(newTask.title).toLowerCase();
+  var existingCleanTitle = this.removeDateFromTitle(existingTask.title).toLowerCase();
+  
+  // 日付除去後のタイトルが完全に同じ場合のみ重複とする
+  if (newCleanTitle === existingCleanTitle && newCleanTitle.length > 0) {
+    console.log('[DuplicateChecker] 完全一致タイトル・同一日付 - 重複確定');
+    return true;
+  }
+  
+  // 高い類似度でも異なるタイトルなら重複ではない
+  var titleSimilarity = Utils.calculateSimilarity(newCleanTitle, existingCleanTitle);
+  if (titleSimilarity > 0.9) { // 非常に高い閾値
+    console.log('[DuplicateChecker] 高類似度・同一日付 - 重複 (類似度: ' + titleSimilarity.toFixed(2) + ')');
+    console.log('  新: "' + newCleanTitle + '" vs 既存: "' + existingCleanTitle + '"');
+    return true;
   }
   
   return false;
@@ -128,39 +142,80 @@ TaskDuplicateChecker.prototype.isDateConflict = function(newTask, existingTask) 
  * ソース重複チェック（強化版）
  */
 TaskDuplicateChecker.prototype.isSourceDuplicate = function(newTask, existingTask) {
-  // 1. 同じソースから同じoriginal_eventで生成されたタスクの重複チェック（日付考慮版）
+  // 1. カレンダーイベントの日付考慮重複チェック（強化版）
+  if (newTask.source === 'calendar' && existingTask.source === 'calendar') {
+    
+    // 元イベント名を取得
+    var newOriginal = newTask.original_event || '';
+    var existingOriginal = existingTask.original_event || '';
+    
+    // コンテキストから元イベント名を抽出（フォールバック）
+    if (!newOriginal && newTask.context && newTask.context.indexOf('元イベント:') !== -1) {
+      var match = newTask.context.match(/元イベント:\s*([^|]+)/);
+      if (match) newOriginal = match[1].trim();
+    }
+    
+    if (!existingOriginal && existingTask.context && existingTask.context.indexOf('元イベント:') !== -1) {
+      var match = existingTask.context.match(/元イベント:\s*([^|]+)/);
+      if (match) existingOriginal = match[1].trim();
+    }
+    
+    // 元イベント名が同じ場合の詳細チェック
+    if (newOriginal && existingOriginal && newOriginal === existingOriginal) {
+      console.log('[DuplicateChecker] 同一元イベント検出: "' + newOriginal + '"');
+      
+      // 日付を詳細比較
+      var newDate = newTask.due_date;
+      var existingDate = existingTask.due_date;
+      
+      if (this.isSameDate(newDate, existingDate)) {
+        console.log('[DuplicateChecker] ✓ 同一イベント・同一日付 - 重複確定');
+        console.log('  新: ' + newDate + ' vs 既存: ' + existingDate);
+        return true;
+      } else {
+        console.log('[DuplicateChecker] ✗ 同一イベント・異なる日付 - 繰り返しイベント許可');
+        console.log('  新: ' + newDate + ' vs 既存: ' + existingDate);
+        return false; // 繰り返しイベントなので重複ではない
+      }
+    }
+    
+    // タイトルレベルでの類似度チェック（厳格化）
+    var newCleanTitle = this.removeDateFromTitle(newTask.title);
+    var existingCleanTitle = this.removeDateFromTitle(existingTask.title);
+    
+    // 日付を除去したタイトルが同じ場合の特別処理
+    if (newCleanTitle === existingCleanTitle && newCleanTitle.length > 0) {
+      console.log('[DuplicateChecker] 同一クリーンタイトル検出: "' + newCleanTitle + '"');
+      
+      if (this.isSameDate(newTask.due_date, existingTask.due_date)) {
+        console.log('[DuplicateChecker] ✓ 同一タイトル・同一日付 - 重複確定');
+        return true;
+      } else {
+        console.log('[DuplicateChecker] ✗ 同一タイトル・異なる日付 - 繰り返しイベント許可');
+        return false;
+      }
+    }
+    
+    // 高い類似度での重複チェック（閾値を上げる）
+    var similarity = Utils.calculateSimilarity(newCleanTitle, existingCleanTitle);
+    if (similarity > 0.95) { // 閾値を0.85から0.95に上げる
+      if (this.isSameDate(newTask.due_date, existingTask.due_date)) {
+        console.log('[DuplicateChecker] ✓ 高類似度・同一日付 - 重複 (類似度: ' + similarity.toFixed(2) + ')');
+        return true;
+      } else {
+        console.log('[DuplicateChecker] ✗ 高類似度・異なる日付 - スキップ (類似度: ' + similarity.toFixed(2) + ')');
+        return false;
+      }
+    }
+  }
+  
+  // 2. 他のソース（Gmail等）の従来処理
   if (newTask.source === existingTask.source && 
       newTask.original_event === existingTask.original_event &&
       newTask.original_event && newTask.original_event.trim().length > 0) {
     
-    // 繰り返しイベント対応: 同じタイトルでも異なる日付なら重複ではない
-    if (newTask.source === 'calendar' && existingTask.source === 'calendar') {
-      if (!this.isSameDate(newTask.due_date, existingTask.due_date)) {
-        console.log('[DuplicateChecker] 同一イベント・異なる日付 - スキップ: ' + newTask.original_event);
-        console.log('  新タスク日付: ' + newTask.due_date + ', 既存タスク日付: ' + existingTask.due_date);
-        return false; // 異なる日付なら重複ではない
-      }
-    }
-    
     console.log('[DuplicateChecker] ソース重複検出 - original_event: ' + newTask.original_event);
     return true;
-  }
-  
-  // 2. カレンダーの場合：同じ日付で正規化タイトルが類似
-  if (newTask.source === 'calendar' && existingTask.source === 'calendar') {
-    // 同じ日付かチェック
-    if (this.isSameDate(newTask.due_date, existingTask.due_date)) {
-      var normalizedNew = this.normalizeCalendarTitle(newTask.title);
-      var normalizedExisting = this.normalizeCalendarTitle(existingTask.title);
-      
-      // 正規化後の類似度チェック
-      var similarity = Utils.calculateSimilarity(normalizedNew, normalizedExisting);
-      if (similarity > 0.85) {
-        console.log('[DuplicateChecker] カレンダー正規化重複検出 - 類似度: ' + similarity.toFixed(2));
-        console.log('  新: "' + normalizedNew + '" vs 既存: "' + normalizedExisting + '"');
-        return true;
-      }
-    }
   }
   
   return false;
@@ -197,11 +252,19 @@ TaskDuplicateChecker.prototype.isSameDate = function(date1, date2) {
 };
 
 /**
- * タイトルから日付部分を除去
+ * タイトルから日付・時間部分を除去（強化版）
  */
 TaskDuplicateChecker.prototype.removeDateFromTitle = function(title) {
-  // (YYYY-MM-DD) 形式の日付を除去
-  return title.replace(/\s*\(\d{4}-\d{2}-\d{2}\)\s*$/, '').trim();
+  if (!title) return '';
+  
+  return title
+    .replace(/\s*\(\d{4}-\d{2}-\d{2}\)\s*$/, '') // (YYYY-MM-DD) 形式
+    .replace(/\s*\(\d{2}:\d{2}-\d{2}:\d{2}\)\s*$/, '') // (HH:MM-HH:MM) 形式
+    .replace(/\s*\d{4}年\d{1,2}月\d{1,2}日\s*/, '') // YYYY年MM月DD日 形式
+    .replace(/\s*\d{1,2}\/\d{1,2}\s*/, '') // MM/DD 形式
+    .replace(/\s*\d{1,2}-\d{1,2}\s*/, '') // MM-DD 形式
+    .replace(/\s*\(\d{2}:\d{2}-\d{2}:\d{2}\)$/, '') // 末尾の時間形式
+    .trim();
 };
 
 /**
