@@ -60,22 +60,28 @@ TaskExtractor.prototype.extractFromCalendar = function(startDate, endDate) {
         continue;
       }
       
-      // Notion処理済みチェック
-      if (this.notionClient.isAlreadyProcessed(eventTitle, eventDate)) {
-        console.log('[TaskExtractor] スキップ（Notion処理済み）: ' + eventTitle);
-        // 処理済みなのにカレンダーマークがない場合はマークを追加
-        try {
-          this.calendarUpdater.markEventAsProcessed(event);
-        } catch (markError) {
-          console.warn('[TaskExtractor] カレンダーマーク追加エラー: ' + markError.message);
-        }
+      // ProcessedTrackerチェック（ローカル追跡によるフォールバック優先）
+      if (this.processedTracker && this.processedTracker.isCalendarEventProcessed(event)) {
+        console.log('[TaskExtractor] スキップ（ProcessedTracker）: ' + eventTitle);
         skippedCount++;
         continue;
       }
       
-      // ProcessedTrackerチェック（従来機能との互換性）
-      if (this.processedTracker && this.processedTracker.isCalendarEventProcessed(event)) {
-        console.log('[TaskExtractor] スキップ（ProcessedTracker）: ' + eventTitle);
+      // Notion処理済みチェック（フォールバック記録付き）
+      if (this.notionClient.isAlreadyProcessed(eventTitle, eventDate)) {
+        console.log('[TaskExtractor] スキップ（Notion処理済み）: ' + eventTitle);
+        // 処理済みなのにカレンダーマークがない場合はマークを追加、失敗時はProcessedTrackerで記録
+        try {
+          var marked = this.calendarUpdater.markEventAsProcessed(event);
+          if (!marked && this.processedTracker) {
+            this.processedTracker.markCalendarEventAsProcessed(event, []);
+          }
+        } catch (markError) {
+          console.warn('[TaskExtractor] カレンダーマーク追加エラー: ' + markError.message);
+          if (this.processedTracker) {
+            try { this.processedTracker.markCalendarEventAsProcessed(event, []); } catch (e2) {}
+          }
+        }
         skippedCount++;
         continue;
       }
@@ -538,8 +544,20 @@ TaskExtractor.prototype.updateProcessedEvents = function(events) {
         stats.processed++;
         console.log('[TaskExtractor] ✓ 直接更新成功: ' + event.getTitle());
       } else {
-        stats.errors++;
-        console.log('[TaskExtractor] ❌ 直接更新失敗: ' + event.getTitle());
+        // カレンダーマーク付与に失敗した場合のフォールバック
+        if (this.processedTracker) {
+          try {
+            this.processedTracker.markCalendarEventAsProcessed(event, []);
+            stats.skipped++; // 次回以降はローカルでブロックされる
+            console.log('[TaskExtractor] ⚠ フォールバック記録(ProcessedTracker): ' + event.getTitle());
+          } catch (fallbackError) {
+            stats.errors++;
+            console.log('[TaskExtractor] ❌ 直接更新失敗(フォールバック不可): ' + event.getTitle());
+          }
+        } else {
+          stats.errors++;
+          console.log('[TaskExtractor] ❌ 直接更新失敗: ' + event.getTitle());
+        }
       }
     } catch (error) {
       stats.errors++;

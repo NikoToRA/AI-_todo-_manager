@@ -144,6 +144,10 @@ TaskDuplicateChecker.prototype.isDateConflict = function(newTask, existingTask) 
 TaskDuplicateChecker.prototype.isSourceDuplicate = function(newTask, existingTask) {
   // 1. カレンダーイベントの日付考慮重複チェック（強化版）
   if (newTask.source === 'calendar' && existingTask.source === 'calendar') {
+    // 日付が異なる場合は繰り返しイベントとして重複扱いしない（タイトル類似チェックにも進まない）
+    if (!this.isSameDate(newTask.due_date, existingTask.due_date)) {
+      return false;
+    }
     
     // 元イベント名を取得
     var newOriginal = newTask.original_event || '';
@@ -196,16 +200,11 @@ TaskDuplicateChecker.prototype.isSourceDuplicate = function(newTask, existingTas
       }
     }
     
-    // 高い類似度での重複チェック（閾値を上げる）
+    // 高い類似度での重複チェック（同一日付時のみ適用）
     var similarity = Utils.calculateSimilarity(newCleanTitle, existingCleanTitle);
-    if (similarity > 0.95) { // 閾値を0.85から0.95に上げる
-      if (this.isSameDate(newTask.due_date, existingTask.due_date)) {
-        console.log('[DuplicateChecker] ✓ 高類似度・同一日付 - 重複 (類似度: ' + similarity.toFixed(2) + ')');
-        return true;
-      } else {
-        console.log('[DuplicateChecker] ✗ 高類似度・異なる日付 - スキップ (類似度: ' + similarity.toFixed(2) + ')');
-        return false;
-      }
+    if (similarity > 0.95) {
+      console.log('[DuplicateChecker] ✓ 高類似度・同一日付 - 重複 (類似度: ' + similarity.toFixed(2) + ')');
+      return true;
     }
   }
   

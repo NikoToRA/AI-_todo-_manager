@@ -232,6 +232,15 @@ class NotionClient {
           }
         });
       }
+      // ソースフィルタ（例: calendar, gmail 等）
+      if (filter && filter.source) {
+        queryFilter.and.push({
+          'property': 'source',
+          'select': {
+            'equals': filter.source
+          }
+        });
+      }
       
       var payload = {
         'filter': queryFilter,
@@ -757,9 +766,14 @@ NotionClient.prototype.isAlreadyProcessed = function(originalEvent, eventDate) {
             'property': 'source',
             'select': { 'equals': 'calendar' }
           },
+          // タイトルプロパティ名のゆらぎを考慮して OR で複数候補を試す
           {
-            'property': 'Name',
-            'title': { 'equals': originalEvent + dateString }
+            'or': [
+              { 'property': 'Name',    'title': { 'equals': originalEvent + dateString } },
+              { 'property': 'title',   'title': { 'equals': originalEvent + dateString } },
+              { 'property': '名前',     'title': { 'equals': originalEvent + dateString } },
+              { 'property': 'タイトル', 'title': { 'equals': originalEvent + dateString } }
+            ]
           }
         ]
       };
@@ -784,8 +798,12 @@ NotionClient.prototype.isAlreadyProcessed = function(originalEvent, eventDate) {
           'select': { 'equals': 'calendar' }
         },
         {
-          'property': 'Name',
-          'title': { 'contains': originalEvent }
+          'or': [
+            { 'property': 'Name',    'title': { 'contains': originalEvent } },
+            { 'property': 'title',   'title': { 'contains': originalEvent } },
+            { 'property': '名前',     'title': { 'contains': originalEvent } },
+            { 'property': 'タイトル', 'title': { 'contains': originalEvent } }
+          ]
         }
       ]
     };
@@ -800,8 +818,17 @@ NotionClient.prototype.isAlreadyProcessed = function(originalEvent, eventDate) {
       if (eventDate) {
         for (var i = 0; i < result.length; i++) {
           var task = result[i];
-          if (task.properties && task.properties['日付'] && task.properties['日付'].date) {
-            var taskDate = task.properties['日付'].date.start;
+          // 日付プロパティ名のゆらぎ対応: '日付' or 'due_date'
+          var dateProp = null;
+          if (task.properties) {
+            if (task.properties['日付'] && task.properties['日付'].date) {
+              dateProp = task.properties['日付'];
+            } else if (task.properties['due_date'] && task.properties['due_date'].date) {
+              dateProp = task.properties['due_date'];
+            }
+          }
+          if (dateProp && dateProp.date) {
+            var taskDate = dateProp.date.start;
             // 日付の形式を統一して比較
             var normalizedTaskDate = taskDate.split('T')[0]; // YYYY-MM-DD部分のみ
             if (normalizedTaskDate === eventDate) {
@@ -810,7 +837,8 @@ NotionClient.prototype.isAlreadyProcessed = function(originalEvent, eventDate) {
             }
           }
         }
-        console.log('[NotionClient] 部分一致あるが日付不一致 - 未処理扱い');
+        // 日付プロパティが取得できない、または全て不一致の場合は未処理扱い
+        console.log('[NotionClient] 部分一致あるが日付一致なし - 未処理扱い');
       } else {
         return true; // 日付情報がない場合はタイトル一致で重複とみなす
       }
