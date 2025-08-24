@@ -74,24 +74,8 @@ TaskExtractor.prototype.extractFromCalendar = function(startDate, endDate) {
         continue;
       }
       
-      // Notion処理済みチェック（フォールバック記録付き）
-      if (this.notionClient.isAlreadyProcessed(eventTitle, eventDate)) {
-        console.log('[TaskExtractor] スキップ（Notion処理済み）: ' + eventTitle);
-        // 処理済みなのにカレンダーマークがない場合はマークを追加、失敗時はProcessedTrackerで記録
-        try {
-          var marked = this.calendarUpdater.markEventAsProcessed(event);
-          if (!marked && this.processedTracker) {
-            this.processedTracker.markCalendarEventAsProcessed(event, []);
-          }
-        } catch (markError) {
-          console.warn('[TaskExtractor] カレンダーマーク追加エラー: ' + markError.message);
-          if (this.processedTracker) {
-            try { this.processedTracker.markCalendarEventAsProcessed(event, []); } catch (e2) {}
-          }
-        }
-        skippedCount++;
-        continue;
-      }
+      // ★ Notion処理済みチェックを削除 ★
+      // Notionとの一致チェックは行わず、カレンダーマークのみで判定
       
       // タスク抽出
       var extractedTasks = this.analyzeCalendarEvent(event);
@@ -311,32 +295,27 @@ TaskExtractor.prototype.processAndCreateTasks = function(tasks, source) {
   var processedTasks = [];
   
   try {
-    // 既存タスクを取得
-    var existingTasks = this.notionClient.getExistingTasks({ source: source });
+    console.log('[TaskExtractor] ★ 簡素化モード: Notion重複チェックを無効化 ★');
+    console.log('[TaskExtractor] 全てのタスクをNotionに直接作成します');
     
     for (var i = 0; i < tasks.length; i++) {
       var task = tasks[i];
       try {
-        // 重複チェック
-        var isDuplicate = this.duplicateChecker.checkBasicDuplicate(task, existingTasks);
+        // ★ 重複チェックを削除 - 直接Notionに作成 ★
+        console.log('[TaskExtractor] タスク作成: "' + task.title + '"');
         
-        if (!isDuplicate) {
-          // Notionに作成
-          var result = this.notionClient.createTask(task);
-          if (result && result.success) {
-            task.created = true;
-            task.notionId = result.id;
-          } else {
-            task.created = false;
-            task.error = result ? result.error : 'unknown error';
-          }
-          processedTasks.push(task);
+        // Notionに作成
+        var result = this.notionClient.createTask(task);
+        if (result && result.success) {
+          task.created = true;
+          task.notionId = result.id;
+          console.log('[TaskExtractor] ✅ Notion作成成功: "' + task.title + '"');
         } else {
-          console.log('[TaskExtractor] 重複スキップ: ' + task.title);
           task.created = false;
-          task.skipped = true;
-          processedTasks.push(task);
+          task.error = result ? result.error : 'unknown error';
+          console.log('[TaskExtractor] ❌ Notion作成失敗: "' + task.title + '": ' + (task.error || 'unknown'));
         }
+        processedTasks.push(task);
         
       } catch (error) {
         console.error('[TaskExtractor] タスク処理エラー: ' + error.message);
@@ -347,27 +326,8 @@ TaskExtractor.prototype.processAndCreateTasks = function(tasks, source) {
     }
     
   } catch (error) {
-    console.error('[TaskExtractor] 既存タスク取得エラー: ' + error.message);
-    // 既存タスク取得に失敗した場合は、重複チェックなしで処理続行
-    for (var j = 0; j < tasks.length; j++) {
-      var task = tasks[j];
-      try {
-        var result = this.notionClient.createTask(task);
-        if (result && result.success) {
-          task.created = true;
-          task.notionId = result.id;
-        } else {
-          task.created = false;
-          task.error = result ? result.error : 'unknown error';
-        }
-        processedTasks.push(task);
-      } catch (createError) {
-        console.error('[TaskExtractor] タスク作成エラー: ' + createError.message);
-        task.created = false;
-        task.error = createError.message;
-        processedTasks.push(task);
-      }
-    }
+    console.error('[TaskExtractor] タスク処理エラー: ' + error.message);
+    console.log('[TaskExtractor] ★ エラー時も簡素化モードで続行 ★');
   }
   
   return processedTasks;

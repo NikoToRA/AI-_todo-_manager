@@ -17,10 +17,10 @@
 
     <main>
       <div class="input-methods">
-        <h2>入力方法を選択</h2>
+        <h2>タスク処理</h2>
         <div class="button-group">
-          <button id="calendar-btn" class="method-btn" onclick="selectMethod('calendar')">
-            📅 カレンダーから
+          <button id="calendar-check-btn" class="method-btn primary" onclick="runCalendarCheck()">
+            📅 カレンダーチェック実行
           </button>
           <button id="gmail-btn" class="method-btn" onclick="selectMethod('gmail')">
             📧 Gmailから
@@ -29,6 +29,11 @@
             🎤 音声入力から
           </button>
         </div>
+        <p class="auto-info">
+          🌙 <strong>自動実行:</strong> 毎日深夜3時に自動でカレンダーをチェックします<br>
+          🔍 <strong>補完チェック:</strong> 毎日昼12時に抜け漏れをチェックします<br>
+          👆 <strong>手動実行:</strong> 上のボタンでいつでも手動チェック可能
+        </p>
       </div>
 
       <div id="voice-input" class="voice-input" style="display: none;">
@@ -82,35 +87,8 @@
           <input type="password" id="gemini-api-key" placeholder="AIza...">
         </div>
         <div class="form-group">
-          <label for="execution-frequency">実行頻度:</label>
-          <select id="execution-frequency">
-            <option value="daily">毎日</option>
-            <option value="weekdays">平日のみ</option>
-            <option value="weekly">週1回</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label for="execution-hour">実行時間:</label>
-          <select id="execution-hour">
-            <option value="6">6時</option>
-            <option value="7">7時</option>
-            <option value="8" selected>8時（推奨）</option>
-            <option value="9">9時</option>
-            <option value="10">10時</option>
-            <option value="11">11時</option>
-            <option value="12">12時</option>
-            <option value="13">13時</option>
-            <option value="14">14時</option>
-            <option value="15">15時</option>
-            <option value="16">16時</option>
-            <option value="17">17時</option>
-            <option value="18">18時</option>
-            <option value="19">19時</option>
-            <option value="20">20時</option>
-            <option value="21">21時</option>
-            <option value="22">22時</option>
-          </select>
-          <small>自動実行する時間を選択してください</small>
+          <label class="info-text">🌙 自動実行: 毎日深夜3時に実行（変更不可）</label>
+          <small>最適な実行時間で自動処理します。手動でのチェックも可能です。</small>
         </div>
         <div class="form-group">
           <label for="data-range-days">データ取得期間 (日):</label>

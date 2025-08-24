@@ -4,7 +4,22 @@
   let isRecording = false;
   
   /**
-   * 入力方法選択
+   * カレンダーチェック実行
+   */
+  function runCalendarCheck() {
+    console.log('カレンダーチェック開始');
+    
+    // ボタンの状態更新
+    const button = document.getElementById('calendar-check-btn');
+    button.disabled = true;
+    button.innerHTML = '🔄 チェック中...';
+    
+    // 処理開始
+    startCalendarProcessing();
+  }
+  
+  /**
+   * 入力方法選択（Gmail/音声用）
    */
   function selectMethod(method) {
     currentMethod = method;
@@ -110,6 +125,25 @@
   }
   
   /**
+   * カレンダー処理開始（新しい深夜実行システム使用）
+   */
+  function startCalendarProcessing() {
+    // UI更新
+    document.querySelector('.input-methods').style.display = 'none';
+    document.getElementById('voice-input').style.display = 'none';
+    document.getElementById('processing').style.display = 'block';
+    document.getElementById('results').style.display = 'none';
+    
+    updateStatus('📅 カレンダーをスキャン中...');
+    
+    // 新しい深夜実行システムを呼び出し
+    google.script.run
+      .withSuccessHandler(onCalendarProcessingSuccess)
+      .withFailureHandler(onProcessingError)
+      .deepNightExecution();
+  }
+  
+  /**
    * 処理開始
    */
   function startProcessing(method, options = {}) {
@@ -123,9 +157,7 @@
     
     // GAS関数呼び出し - WebAppFunctions経由
     let gasFunction;
-    if (method === 'calendar') {
-      gasFunction = 'transferCalendarEvents';
-    } else if (method === 'gmail') {
+    if (method === 'gmail') {
       gasFunction = 'transferGmailMessages';
     } else if (method === 'voice') {
       gasFunction = 'processVoiceInput';
@@ -143,6 +175,27 @@
       .withSuccessHandler(onProcessingSuccess)
       .withFailureHandler(onProcessingError)
       [gasFunction]();
+  }
+  
+  /**
+   * カレンダー処理成功時のコールバック
+   */
+  function onCalendarProcessingSuccess(result) {
+    console.log('カレンダー処理成功:', result);
+    
+    // ボタンを元に戻す
+    const button = document.getElementById('calendar-check-btn');
+    button.disabled = false;
+    button.innerHTML = '📅 カレンダーチェック実行';
+    
+    document.getElementById('processing').style.display = 'none';
+    document.getElementById('results').style.display = 'block';
+    
+    if (result.success) {
+      displayCalendarResults(result);
+    } else {
+      displayError(result.error || 'カレンダー処理でエラーが発生しました');
+    }
   }
   
   /**
@@ -249,6 +302,63 @@
         </div>
         <button onclick="resetUI()" class="reset-btn">新しい処理を開始</button>
       `;
+    }
+  }
+  
+  /**
+   * カレンダー結果表示
+   */
+  function displayCalendarResults(result) {
+    const content = document.getElementById('result-content');
+    
+    if (result.success) {
+      const stats = result.stats || {};
+      const verification = result.verification || {};
+      
+      let verificationInfo = '';
+      if (verification.issues && verification.issues.length > 0) {
+        verificationInfo = `
+          <div class="warning">
+            <h5>⚠️ 検出された問題</h5>
+            <ul>
+              ${verification.issues.map(issue => `<li>${issue}</li>`).join('')}
+            </ul>
+          </div>
+        `;
+      }
+      
+      content.innerHTML = `
+        <div class="success">
+          <h4>🎉 カレンダーチェック完了</h4>
+          <div class="stats">
+            <div class="stat-item">
+              <span class="stat-label">📊 総イベント:</span>
+              <span class="stat-value">${stats.totalEvents || 0}件</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-label">🔍 未マークイベント:</span>
+              <span class="stat-value">${stats.unmarkedEvents || 0}件</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-label">📝 処理済みイベント:</span>
+              <span class="stat-value">${stats.processedEvents || 0}件</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-label">✅ 作成タスク:</span>
+              <span class="stat-value">${stats.createdTasks || 0}件</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-label">🤖 ロボットマーク追加:</span>
+              <span class="stat-value">${stats.markedEvents || 0}件</span>
+            </div>
+          </div>
+          ${verificationInfo}
+          <p class="execution-time">⏱️ 実行時間: ${Math.round((result.executionTime || 0) / 1000)}秒</p>
+        </div>
+        <button onclick="resetUI()" class="reset-btn">新しい処理を開始</button>
+      `;
+    } else {
+      displayError(result.error || 'カレンダーチェックでエラーが発生しました');
     }
   }
   
