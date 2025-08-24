@@ -534,6 +534,62 @@ class NotionClient {
   }
   
   /**
+   * データベースをクエリして条件に合うページを取得
+   * @param {Object} filter フィルター条件
+   * @param {Array} sorts ソート条件
+   * @returns {Object} クエリ結果
+   */
+  queryDatabase(filter, sorts) {
+    try {
+      console.log('[NotionClient] データベースクエリ開始');
+      
+      // データベースIDのクリーンアップ
+      var cleanDatabaseId = this.databaseId.replace(/\n/g, '').trim();
+      
+      var url = this.baseUrl + '/databases/' + cleanDatabaseId + '/query';
+      
+      var payload = {};
+      
+      if (filter) {
+        payload.filter = filter;
+      }
+      
+      if (sorts) {
+        payload.sorts = sorts;
+      }
+      
+      var options = {
+        'method': 'POST',
+        'headers': {
+          'Authorization': 'Bearer ' + this.token,
+          'Notion-Version': this.version,
+          'Content-Type': 'application/json'
+        },
+        'payload': JSON.stringify(payload),
+        'muteHttpExceptions': true,
+        'timeout': 30000
+      };
+      
+      var response = UrlFetchApp.fetch(url, options);
+      var responseCode = response.getResponseCode();
+      var responseText = response.getContentText();
+      
+      if (responseCode === 200) {
+        var data = JSON.parse(responseText);
+        console.log('[NotionClient] クエリ成功: ' + data.results.length + '件');
+        return data;
+      } else {
+        console.error('[NotionClient] クエリ失敗:', responseCode, responseText);
+        return { results: [] };
+      }
+      
+    } catch (error) {
+      console.error('[NotionClient] クエリエラー:', error.message);
+      return { results: [] };
+    }
+  }
+  
+  /**
    * データベース接続テスト
    * @returns {Object} テスト結果
    */

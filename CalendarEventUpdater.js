@@ -1,8 +1,11 @@
 /**
  * カレンダーイベント更新クラス（ES5互換版）
+ * 要件：カレンダーイベントをNotionに転記後、重複防止のためロボットマークを追加
  */
 function CalendarEventUpdater() {
   this.processedTag = '🤖';
+  this.maxRetries = 3; // マーク追加失敗時のリトライ回数
+  this.retryDelay = 1000; // リトライ間隔（ミリ秒）
 }
 
 /**
@@ -13,6 +16,7 @@ function CalendarEventUpdater() {
 CalendarEventUpdater.prototype.isEventProcessed = function(event) {
   try {
     var title = event.getTitle();
+    // タイトルの先頭または末尾にロボットマークがあるかチェック
     var isProcessed = title.indexOf(this.processedTag) !== -1;
     
     if (isProcessed) {
@@ -27,38 +31,59 @@ CalendarEventUpdater.prototype.isEventProcessed = function(event) {
 };
 
 /**
- * カレンダーイベントに処理済みタグを追加
+ * カレンダーイベントに処理済みタグを追加（リトライ機能付き）
  * @param {CalendarEvent} event カレンダーイベント
  * @returns {boolean} 成功した場合true
  */
 CalendarEventUpdater.prototype.markEventAsProcessed = function(event) {
-  try {
-    var originalTitle = event.getTitle();
-    
-    // 既に処理済みタグが付いている場合はスキップ
-    if (this.isEventProcessed(event)) {
-      console.log('[CalendarEventUpdater] 既に処理済み: "' + originalTitle + '"');
-      return true;
+  var retries = 0;
+  var success = false;
+  
+  while (retries < this.maxRetries && !success) {
+    try {
+      var originalTitle = event.getTitle();
+      
+      // 既に処理済みタグが付いている場合はスキップ
+      if (this.isEventProcessed(event)) {
+        console.log('[CalendarEventUpdater] 既に処理済み: "' + originalTitle + '"');
+        return true;
+      }
+      
+      // 処理済みタグを追加（タイトルの先頭に配置して視認性を向上）
+      var newTitle = this.processedTag + ' ' + originalTitle;
+      
+      console.log('[CalendarEventUpdater] イベントタイトル更新（試行 ' + (retries + 1) + '/' + this.maxRetries + '）:');
+      console.log('  元: "' + originalTitle + '"');
+      console.log('  新: "' + newTitle + '"');
+      
+      // カレンダーイベントのタイトルを更新
+      event.setTitle(newTitle);
+      
+      // 更新確認（即座に読み直して確認）
+      Utilities.sleep(500); // 更新の反映を待つ
+      var updatedTitle = event.getTitle();
+      if (updatedTitle.indexOf(this.processedTag) !== -1) {
+        console.log('[CalendarEventUpdater] ✅ 処理済みタグ追加成功');
+        success = true;
+        return true;
+      } else {
+        throw new Error('タイトル更新が反映されませんでした');
+      }
+      
+    } catch (error) {
+      retries++;
+      console.error('[CalendarEventUpdater] イベント更新エラー（試行 ' + retries + '/' + this.maxRetries + '）:', error.message);
+      console.error('  イベント: "' + (event.getTitle ? event.getTitle() : 'unknown') + '"');
+      
+      if (retries < this.maxRetries) {
+        console.log('[CalendarEventUpdater] ' + (this.retryDelay / 1000) + '秒後にリトライします...');
+        Utilities.sleep(this.retryDelay);
+      }
     }
-    
-    // 処理済みタグを追加
-    var newTitle = originalTitle + ' ' + this.processedTag;
-    
-    console.log('[CalendarEventUpdater] イベントタイトル更新:');
-    console.log('  元: "' + originalTitle + '"');
-    console.log('  新: "' + newTitle + '"');
-    
-    // カレンダーイベントのタイトルを更新
-    event.setTitle(newTitle);
-    
-    console.log('[CalendarEventUpdater] ✓ 処理済みタグ追加完了');
-    return true;
-    
-  } catch (error) {
-    console.error('[CalendarEventUpdater] イベント更新エラー:', error.message);
-    console.error('  イベント: "' + (event.getTitle ? event.getTitle() : 'unknown') + '"');
-    return false;
   }
+  
+  console.error('[CalendarEventUpdater] ❌ マーク追加失敗（全リトライ終了）');
+  return false;
 };
 
 /**
@@ -182,6 +207,49 @@ CalendarEventUpdater.prototype.findProcessedEventsInRange = function(startDate, 
     
   } catch (error) {
     console.error('[CalendarEventUpdater] 処理済みイベント検索エラー:', error.message);
+    return [];
+  }
+};
+
+/**
+ * 指定期間の未処理イベントを検索
+ * @param {Date} startDate 開始日
+ * @param {Date} endDate 終了日
+ * @returns {Array} 未処理イベント情報
+ */
+CalendarEventUpdater.prototype.findUnprocessedEventsInRange = function(startDate, endDate) {
+  try {
+    console.log('[CalendarEventUpdater] 未処理イベント検索: ' + startDate.toLocaleDateString() + ' - ' + endDate.toLocaleDateString());
+    
+    var calendars = CalendarApp.getAllCalendars();
+    var unprocessedEvents = [];
+    
+    for (var i = 0; i < calendars.length; i++) {
+      var calendar = calendars[i];
+      try {
+        var events = calendar.getEvents(startDate, endDate);
+        
+        for (var j = 0; j < events.length; j++) {
+          var event = events[j];
+          if (!this.isEventProcessed(event)) {
+            unprocessedEvents.push({
+              title: event.getTitle(),
+              start: event.getStartTime(),
+              calendar: calendar.getName(),
+              event: event
+            });
+          }
+        }
+      } catch (error) {
+        console.warn('[CalendarEventUpdater] カレンダー「' + calendar.getName() + '」でエラー:', error.message);
+      }
+    }
+    
+    console.log('[CalendarEventUpdater] 未処理イベント検索完了: ' + unprocessedEvents.length + '件');
+    return unprocessedEvents;
+    
+  } catch (error) {
+    console.error('[CalendarEventUpdater] 未処理イベント検索エラー:', error.message);
     return [];
   }
 };
