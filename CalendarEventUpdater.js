@@ -9,23 +9,42 @@ function CalendarEventUpdater() {
 }
 
 /**
- * カレンダーイベントが処理済みかチェック
+ * カレンダーイベントが処理済みかチェック（強化版）
  * @param {CalendarEvent} event カレンダーイベント
  * @returns {boolean} 処理済みの場合true
  */
 CalendarEventUpdater.prototype.isEventProcessed = function(event) {
   try {
-    var title = event.getTitle();
-    // タイトルの先頭または末尾にロボットマークがあるかチェック
-    var isProcessed = title.indexOf(this.processedTag) !== -1;
-    
-    if (isProcessed) {
-      console.log('[CalendarEventUpdater] 処理済みイベント検出: "' + title + '"');
+    if (!event) {
+      console.warn('[CalendarEventUpdater] nullイベントが渡されました');
+      return false;
     }
     
-    return isProcessed;
+    var title = event.getTitle();
+    if (!title) {
+      console.warn('[CalendarEventUpdater] タイトルが取得できません');
+      return false;
+    }
+    
+    // ロボットマーク（🤖）の存在チェック
+    var isProcessed = title.indexOf(this.processedTag) !== -1;
+    
+    // より厳密なチェック：タイトルの先頭にロボットマークがあるかも確認
+    var hasRobotAtStart = title.indexOf(this.processedTag) === 0;
+    
+    if (isProcessed) {
+      console.log('[CalendarEventUpdater] 🤖処理済みイベント検出: "' + title + '"');
+      console.log('[CalendarEventUpdater] ロボットマーク位置: ' + title.indexOf(this.processedTag));
+      return true;
+    }
+    
+    // デバッグ用：処理済みでない場合もログ出力
+    console.log('[CalendarEventUpdater] 未処理イベント: "' + title + '"');
+    
+    return false;
   } catch (error) {
     console.error('[CalendarEventUpdater] 処理済みチェックエラー:', error.message);
+    console.error('[CalendarEventUpdater] イベント詳細:', error.stack);
     return false;
   }
 };

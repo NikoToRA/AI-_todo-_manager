@@ -51,11 +51,18 @@ TaskExtractor.prototype.extractFromCalendar = function(startDate, endDate) {
       var eventTitle = event.getTitle();
       var eventDate = event.getStartTime().toISOString().split('T')[0];
       
-      console.log('[TaskExtractor] イベント処理中: ' + eventTitle);
+      console.log('[TaskExtractor] イベント処理中: "' + eventTitle + '"');
       
-      // カレンダー処理済みチェック（最優先）
+      // 🤖ロボットマークチェック（最優先・強化版）
       if (this.calendarUpdater.isEventProcessed(event)) {
-        console.log('[TaskExtractor] スキップ（カレンダー処理済み）: ' + eventTitle);
+        console.log('[TaskExtractor] ✅ スキップ（🤖ロボットマーク検出）: "' + eventTitle + '"');
+        skippedCount++;
+        continue;
+      }
+      
+      // 追加の安全チェック：タイトルに直接🤖が含まれている場合もスキップ
+      if (eventTitle && eventTitle.indexOf('🤖') !== -1) {
+        console.log('[TaskExtractor] ✅ スキップ（タイトルに🤖マーク含む）: "' + eventTitle + '"');
         skippedCount++;
         continue;
       }
@@ -92,9 +99,24 @@ TaskExtractor.prototype.extractFromCalendar = function(startDate, endDate) {
         tasks = tasks.concat(extractedTasks);
         processedEvents.push(event); // 処理対象として記録
         
+        console.log('[TaskExtractor] 📝 タスク抽出成功: "' + eventTitle + '" → ' + extractedTasks.length + '件のタスク');
+        
         // ProcessedTrackerが使える場合のマーク
         if (this.processedTracker) {
           this.processedTracker.markCalendarEventAsProcessed(event, extractedTasks);
+        }
+        
+        // 即座にロボットマークを追加（タスク作成成功前でもマーク）
+        console.log('[TaskExtractor] 🤖 即座にロボットマーク追加試行: "' + eventTitle + '"');
+        try {
+          var immediateMarkResult = this.calendarUpdater.markEventAsProcessed(event);
+          if (immediateMarkResult) {
+            console.log('[TaskExtractor] ✅ 即座のロボットマーク追加成功: "' + eventTitle + '"');
+          } else {
+            console.log('[TaskExtractor] ⚠️ 即座のロボットマーク追加失敗 - 後で再試行: "' + eventTitle + '"');
+          }
+        } catch (markError) {
+          console.warn('[TaskExtractor] ⚠️ 即座のロボットマーク追加エラー: ' + markError.message);
         }
       }
     }
@@ -102,13 +124,20 @@ TaskExtractor.prototype.extractFromCalendar = function(startDate, endDate) {
     // 3. 重複チェックとNotion登録
     var processedTasks = this.processAndCreateTasks(tasks, 'calendar');
     
-    // 4. カレンダーイベントの更新（処理対象全てをマーク - 重複でもマーク）
+    // 4. カレンダーイベントの更新（徹底的なロボットマーク追加）
     var calendarUpdateStats = { processed: 0, errors: 0, skipped: 0, total: 0 };
     
     if (processedEvents.length > 0) {
-      console.log('[TaskExtractor] 処理済みイベントにマーク追加開始: ' + processedEvents.length + '件');
-      console.log('[TaskExtractor] 重複チェック結果に関わらず、すべての処理対象イベントをマーク');
-      calendarUpdateStats = this.updateProcessedEvents(processedEvents);
+      console.log('[TaskExtractor] 🤖 最終ロボットマーク確認・追加開始: ' + processedEvents.length + '件');
+      console.log('[TaskExtractor] 【徹底モード】全ての処理対象イベントに確実にマーク追加');
+      calendarUpdateStats = this.updateProcessedEventsAggressively(processedEvents);
+      
+      // 更に徹底: マーク失敗したイベントを再確認
+      if (calendarUpdateStats.errors > 0) {
+        console.log('[TaskExtractor] ⚠️ マーク失敗イベントの再試行開始: ' + calendarUpdateStats.errors + '件');
+        var retryStats = this.retryFailedMarkings(processedEvents);
+        console.log('[TaskExtractor] 再試行結果: 成功=' + retryStats.recovered + ', 失敗=' + retryStats.stillFailed);
+      }
     } else {
       console.log('[TaskExtractor] マーク対象イベントなし');
     }
@@ -566,5 +595,127 @@ TaskExtractor.prototype.updateProcessedEvents = function(events) {
   }
   
   console.log('[TaskExtractor] 直接更新統計: 成功=' + stats.processed + ', スキップ=' + stats.skipped + ', エラー=' + stats.errors);
+  return stats;
+};
+
+/**
+ * 徹底的なロボットマーク追加（強化版）
+ */
+TaskExtractor.prototype.updateProcessedEventsAggressively = function(events) {
+  var stats = { total: events.length, processed: 0, errors: 0, skipped: 0 };
+  var failedEvents = [];
+  
+  console.log('[TaskExtractor] 🤖【徹底モード】ロボットマーク追加開始: ' + events.length + '件');
+  
+  for (var i = 0; i < events.length; i++) {
+    var event = events[i];
+    var eventTitle = '';
+    
+    try {
+      eventTitle = event.getTitle();
+      console.log('[TaskExtractor] 🤖 マーク処理中 [' + (i + 1) + '/' + events.length + ']: "' + eventTitle + '"');
+      
+      // 既に処理済みかチェック
+      if (this.calendarUpdater.isEventProcessed(event)) {
+        console.log('[TaskExtractor] ✅ 既にマーク済み: "' + eventTitle + '"');
+        stats.skipped++;
+        continue;
+      }
+      
+      // 3回リトライでマーク追加
+      var success = false;
+      var attempts = 0;
+      var maxAttempts = 3;
+      
+      while (!success && attempts < maxAttempts) {
+        attempts++;
+        console.log('[TaskExtractor] 🤖 マーク試行 ' + attempts + '/' + maxAttempts + ': "' + eventTitle + '"');
+        
+        try {
+          success = this.calendarUpdater.markEventAsProcessed(event);
+          if (success) {
+            console.log('[TaskExtractor] ✅ マーク成功 (試行' + attempts + '): "' + eventTitle + '"');
+            stats.processed++;
+            break;
+          } else {
+            console.log('[TaskExtractor] ⚠️ マーク失敗 (試行' + attempts + '): "' + eventTitle + '"');
+            if (attempts < maxAttempts) {
+              Utilities.sleep(1000); // 1秒待機してリトライ
+            }
+          }
+        } catch (markError) {
+          console.warn('[TaskExtractor] ⚠️ マーク例外 (試行' + attempts + '): ' + markError.message);
+          if (attempts < maxAttempts) {
+            Utilities.sleep(1000);
+          }
+        }
+      }
+      
+      if (!success) {
+        console.error('[TaskExtractor] ❌ 全試行失敗: "' + eventTitle + '"');
+        failedEvents.push(event);
+        
+        // フォールバック記録
+        if (this.processedTracker) {
+          try {
+            this.processedTracker.markCalendarEventAsProcessed(event, []);
+            console.log('[TaskExtractor] 🔄 フォールバック記録完了: "' + eventTitle + '"');
+          } catch (fallbackError) {
+            console.error('[TaskExtractor] ❌ フォールバック記録失敗: ' + fallbackError.message);
+          }
+        }
+        stats.errors++;
+      }
+      
+    } catch (error) {
+      console.error('[TaskExtractor] ❌ イベント処理エラー: "' + eventTitle + '": ' + error.message);
+      failedEvents.push(event);
+      stats.errors++;
+    }
+  }
+  
+  console.log('[TaskExtractor] 🤖【徹底モード】完了統計:');
+  console.log('  - 成功: ' + stats.processed + '件');
+  console.log('  - スキップ: ' + stats.skipped + '件'); 
+  console.log('  - 失敗: ' + stats.errors + '件');
+  
+  stats.failedEvents = failedEvents;
+  return stats;
+};
+
+/**
+ * マーク失敗イベントの再試行
+ */
+TaskExtractor.prototype.retryFailedMarkings = function(events) {
+  var stats = { recovered: 0, stillFailed: 0 };
+  
+  console.log('[TaskExtractor] 🔄 失敗イベントの再試行開始');
+  
+  for (var i = 0; i < events.length; i++) {
+    var event = events[i];
+    
+    try {
+      // まだマークされていないイベントのみ再試行
+      if (!this.calendarUpdater.isEventProcessed(event)) {
+        console.log('[TaskExtractor] 🔄 再試行: "' + event.getTitle() + '"');
+        
+        // 少し時間をおいて再試行
+        Utilities.sleep(2000);
+        
+        var success = this.calendarUpdater.markEventAsProcessed(event);
+        if (success) {
+          stats.recovered++;
+          console.log('[TaskExtractor] ✅ 再試行成功: "' + event.getTitle() + '"');
+        } else {
+          stats.stillFailed++;
+          console.log('[TaskExtractor] ❌ 再試行失敗: "' + event.getTitle() + '"');
+        }
+      }
+    } catch (error) {
+      stats.stillFailed++;
+      console.error('[TaskExtractor] ❌ 再試行エラー: ' + error.message);
+    }
+  }
+  
   return stats;
 };
